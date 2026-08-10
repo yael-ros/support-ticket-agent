@@ -11,3 +11,6 @@ venv/
 
 # raw dataset cache — lives in the `datasets` library's default location
 # (~/.cache/huggingface), not repo-local; see load_tickets.py docstring
+
+# local KB vector store (Phase 2)
+support_agent/knowledge_base/chroma/

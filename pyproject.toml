@@ -6,10 +6,12 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2",
     "datasets>=2",
+    "sentence-transformers>=5",
+    "chromadb>=1",
 ]
 
-# Phase 1 (data pipeline) deps only. Later phases add: langgraph, anthropic,
-# tenacity, structlog, chromadb, sentence-transformers, fastapi, uvicorn.
+# Phase 1 + 2 deps. Later phases add: langgraph, anthropic, tenacity,
+# structlog, fastapi, uvicorn.
 
 [project.optional-dependencies]
 dev = [

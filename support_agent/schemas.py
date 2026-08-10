@@ -102,3 +102,40 @@ class GoldSetRow(BaseModel):
     weak_category: Category
     weak_urgency: Urgency
     human_label: HumanLabel | None = None
+
+
+class KBDocument(BaseModel):
+    """A single hand-authored troubleshooting article in the knowledge base.
+
+    Authored originally for this project (see knowledge_base/documents.py);
+    `source_note` records which taxonomy inspired the topic (if any) —
+    never a claim that dataset text was copied, since it wasn't.
+    """
+
+    id: str
+    title: str
+    category: Category
+    body: str
+    source_note: str
+
+
+class Chunk(BaseModel):
+    """A chunk of a KBDocument, produced by knowledge_base/build_index.py."""
+
+    id: str
+    doc_id: str
+    doc_title: str
+    category: Category
+    chunk_index: int
+    text: str
+
+
+class RetrievedChunk(BaseModel):
+    """A chunk returned by knowledge_base/retriever.py, with its similarity score."""
+
+    chunk_id: str
+    doc_id: str
+    doc_title: str
+    category: Category
+    text: str
+    score: float
