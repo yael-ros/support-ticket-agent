@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# secrets
+.env
+
+# raw dataset cache — lives in the `datasets` library's default location
+# (~/.cache/huggingface), not repo-local; see load_tickets.py docstring
