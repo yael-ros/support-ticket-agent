@@ -15,10 +15,16 @@ architecture, and the definition of done for each component.
 - **Type everything.** All function signatures typed; all structured data
   (tickets, classifications, retrieved chunks, agent state) defined as
   Pydantic v2 models in `schemas.py`, never raw dicts passed between modules.
-- **No bare LLM calls.** Every call to the Anthropic API goes through
-  `agent/llm_client.py`, which wraps retries (tenacity, exponential backoff),
-  timeouts, and structured-output parsing. Never call the SDK directly from
-  a node or route handler.
+- **No bare LLM calls, and no node depends on a concrete provider.** Every
+  LLM call goes through `agent/llm_client.py`'s `call_structured()`, which
+  wraps retries (tenacity, exponential backoff), timeouts, and
+  structured-output parsing. Never call a provider SDK directly from a node
+  or route handler. Nodes ask for a `ModelTier` (`FAST`/`STRONG`), never a
+  model name — `llm_client.py` resolves the active provider (env var
+  `LLM_PROVIDER`, default `gemini`) and delegates to its implementation in
+  `agent/providers/*_provider.py`. Both Anthropic and Gemini are fully
+  supported; switching is a one-line env var change, not a code change. See
+  `agent/providers/base.py` for the `LLMProvider` protocol.
 - **Every LLM-facing prompt lives in `agent/prompts.py`** as a named template
   with a docstring explaining what it's for and what output schema it expects.
   No inline prompt strings in logic files.

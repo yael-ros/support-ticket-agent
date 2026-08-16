@@ -8,10 +8,13 @@ dependencies = [
     "datasets>=2",
     "sentence-transformers>=5",
     "chromadb>=1",
+    "anthropic>=0.72",
+    "google-genai>=1",
+    "tenacity>=9",
+    "python-dotenv>=1",
 ]
 
-# Phase 1 + 2 deps. Later phases add: langgraph, anthropic, tenacity,
-# structlog, fastapi, uvicorn.
+# Phase 1 + 2 + 3 deps. Later phases add: langgraph, structlog, fastapi, uvicorn.
 
 [project.optional-dependencies]
 dev = [

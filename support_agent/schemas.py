@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Category(str, Enum):
@@ -139,3 +139,32 @@ class RetrievedChunk(BaseModel):
     category: Category
     text: str
     score: float
+
+
+class TicketClassification(BaseModel):
+    """Structured output of agent/nodes/classify.py's LLM call.
+
+    `confidence` is the model's own self-reported confidence in [0, 1] —
+    not independently calibrated. It feeds the confidence-threshold router
+    in Phase 4 (agent/nodes/route.py), so a classification the model isn't
+    sure about can be routed to human review instead of auto-sent.
+    """
+
+    category: Category
+    urgency: Urgency
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class AgentState(BaseModel):
+    """Mutable state threaded through the LangGraph agent (agent/graph.py, Phase 4).
+
+    Each node reads specific fields off state and writes specific fields
+    back — see .claude/skills/agent-conventions. Fields default to None
+    until the corresponding node has run, so a node (or a test) can always
+    tell whether an upstream step completed rather than inferring it from
+    incidental state. Phase 4 will extend this with retrieval/draft/
+    guardrail/routing fields as those nodes are built.
+    """
+
+    ticket: Ticket
+    classification: TicketClassification | None = None

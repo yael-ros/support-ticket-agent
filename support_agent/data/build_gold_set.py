@@ -90,6 +90,11 @@ def build_gold_set(
     ]
 
 
+def load_gold_set(path: Path = GOLD_SET_PATH) -> list[GoldSetRow]:
+    with path.open(encoding="utf-8") as f:
+        return [GoldSetRow.model_validate_json(line) for line in f if line.strip()]
+
+
 def write_gold_set(rows: list[GoldSetRow], path: Path = GOLD_SET_PATH) -> None:
     with path.open("w", encoding="utf-8") as f:
         for row in rows:
