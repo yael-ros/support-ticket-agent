@@ -78,3 +78,7 @@ everything" call. Each node should be independently testable.
 - Do not add a heavyweight agent framework beyond LangGraph without asking.
 - Do not commit real API keys, `.env`, or the raw Hugging Face dataset cache
   — all are gitignored; verify before every commit.
+- **NEVER add `Co-authored-by` or any other co-author metadata to git
+  commits.** All commits in this repo must be strictly under the user's own
+  identity — no assistant attribution in the message body, trailers, author,
+  or committer fields.
