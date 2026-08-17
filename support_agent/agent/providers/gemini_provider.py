@@ -62,12 +62,18 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 # "-latest" aliases (confirmed present via client.models.list() against
 # this key) are Google's own forward-compat pointer to whatever model
 # they currently want new accounts on, and are a separate quota bucket
-# from the dated ids. STRONG is a placeholder for Phase 4's
-# draft-generation node — not exercised yet, and may need a different
-# (possibly billed) model depending on the free-tier list at that point.
+# from the dated ids.
+#
+# STRONG was originally set to "gemini-pro-latest" (Phase 3, before any
+# node used it) as a documented placeholder. Once Phase 4's draft.py
+# actually exercised it, that model returned a live 429 with limit: 0 for
+# the free tier ("gemini-3.1-pro" — the Pro family is billed-only on this
+# key, confirmed via the actual error body, not guessed). "gemini-flash-latest"
+# is the next tier up from FAST within the Flash family, which IS free-tier
+# eligible for this key (same family as the confirmed-working FAST model).
 MODEL_BY_TIER = {
     ModelTier.FAST: "gemini-flash-lite-latest",
-    ModelTier.STRONG: "gemini-pro-latest",
+    ModelTier.STRONG: "gemini-flash-latest",
 }
 
 T = TypeVar("T", bound=BaseModel)

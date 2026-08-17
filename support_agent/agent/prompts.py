@@ -7,6 +7,8 @@ never as an inline string in a node or route handler.
 
 from __future__ import annotations
 
+from support_agent.schemas import RetrievedChunk
+
 CLASSIFY_TICKET_PROMPT = """You are triaging an incoming customer support ticket for a SaaS product. \
 Read the ticket and classify it.
 
@@ -51,3 +53,49 @@ def format_classify_prompt(subject: str, body: str) -> str:
     agent/llm_client.py — this function only produces the prompt text.
     """
     return CLASSIFY_TICKET_PROMPT.format(subject=subject or "(no subject)", body=body)
+
+
+DRAFT_RESPONSE_PROMPT = """You are drafting a reply to a customer support ticket. Use ONLY the \
+knowledge-base excerpts below as the factual basis for your response — do not rely on outside \
+knowledge about the product, and do not invent steps, policies, or facts that aren't in the \
+excerpts.
+
+Ticket subject: {subject}
+Ticket body:
+{body}
+
+Knowledge-base excerpts:
+{chunks_block}
+
+Write a helpful, professional reply to the customer. Then, for every factual claim in your reply \
+(e.g. "restart the sync client," "this is a known issue in v2.3"), list the excerpt id(s) from \
+above that support it in the `grounding` field. If a claim you want to make isn't backed by any \
+excerpt, leave that claim out of the reply entirely — only write what the excerpts support.
+
+If none of the excerpts above are actually relevant to this ticket, write a short reply saying a \
+human agent will follow up, and leave `grounding` empty — do not stretch an unrelated excerpt to \
+cover the ticket just to have something to cite.
+
+Do not promise refunds, discounts, compensation, or any other concession — say a human agent will \
+review requests like that instead.
+
+Respond by calling the emit_result tool with your draft. Do not include any other commentary.
+"""
+
+
+def format_draft_prompt(subject: str, body: str, chunks: list[RetrievedChunk]) -> str:
+    """Fill DRAFT_RESPONSE_PROMPT for a specific ticket and its retrieved KB chunks.
+
+    Expected output schema: support_agent.schemas.DraftResponse (text,
+    grounding), enforced via tool-use in agent/llm_client.py. Each chunk
+    is labeled with its `chunk_id` in the prompt so the model can cite it
+    verbatim in `grounding` — guardrails.grounding_check later checks
+    those citations against the same chunk ids.
+    """
+    if chunks:
+        chunks_block = "\n\n".join(f"[{chunk.chunk_id}] ({chunk.doc_title}): {chunk.text}" for chunk in chunks)
+    else:
+        chunks_block = "(no relevant excerpts were retrieved for this ticket)"
+    return DRAFT_RESPONSE_PROMPT.format(
+        subject=subject or "(no subject)", body=body, chunks_block=chunks_block
+    )

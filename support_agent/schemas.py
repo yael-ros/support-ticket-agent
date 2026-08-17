@@ -8,6 +8,7 @@ are passed between modules.
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -155,16 +156,88 @@ class TicketClassification(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+class RetrievalContext(BaseModel):
+    """Chunks retrieved for a ticket, plus the query that produced them (agent/nodes/retrieve.py).
+
+    `chunks` may legitimately be empty (no good match in the KB) — that's
+    a real outcome the rest of the graph must handle explicitly, per
+    CLAUDE.md's "no silent failures" rule, not something to paper over.
+    """
+
+    query: str
+    chunks: list[RetrievedChunk]
+
+
+class ClaimGrounding(BaseModel):
+    """One factual claim in a drafted response, mapped to the retrieved chunk id(s) backing it.
+
+    `chunk_ids` is what guardrails.grounding_check verifies against the
+    RetrievalContext actually given to the drafting node — a claim citing
+    a chunk id that was never retrieved is exactly the failure mode this
+    exists to catch.
+    """
+
+    claim: str
+    chunk_ids: list[str]
+
+
+class DraftResponse(BaseModel):
+    """Structured output of agent/nodes/draft.py's LLM call.
+
+    `grounding` must cover every factual claim in `text`. An empty
+    `grounding` list is valid — it means the draft made no claims that
+    need backing (e.g. the KB had nothing relevant, per
+    agent/prompts.py's DRAFT_RESPONSE_PROMPT) — but guardrails.py's
+    grounding_check treats a non-trivial `text` with empty `grounding` as
+    a failure, since that shape usually means the model made claims it
+    forgot to cite rather than genuinely made none.
+    """
+
+    text: str
+    grounding: list[ClaimGrounding]
+
+
+class GuardrailResult(BaseModel):
+    """Result of one guardrail check (guardrails.py).
+
+    `check_name` and `reason` are what make a rejection reviewable by a
+    human rather than just a bare boolean — see
+    .claude/skills/agent-conventions. Set by the guardrail function
+    itself (not inferred from `__name__` by the caller), so the result is
+    self-describing wherever it ends up (state, logs, a human review UI).
+    """
+
+    check_name: str
+    passed: bool
+    reason: str
+
+
+class RoutingDecision(BaseModel):
+    """Output of agent/nodes/route.py: whether a ticket auto-sends or goes to human review, and why.
+
+    `reason` concatenates every contributing factor (low confidence,
+    failed guardrails, empty retrieval), not just the first one found —
+    a human_review ticket should show a reviewer everything that was
+    wrong, not force them to fix one issue and hit the next on resubmit.
+    """
+
+    action: Literal["auto_send", "human_review"]
+    reason: str
+
+
 class AgentState(BaseModel):
-    """Mutable state threaded through the LangGraph agent (agent/graph.py, Phase 4).
+    """Mutable state threaded through the LangGraph agent (agent/graph.py).
 
     Each node reads specific fields off state and writes specific fields
     back — see .claude/skills/agent-conventions. Fields default to None
     until the corresponding node has run, so a node (or a test) can always
     tell whether an upstream step completed rather than inferring it from
-    incidental state. Phase 4 will extend this with retrieval/draft/
-    guardrail/routing fields as those nodes are built.
+    incidental state.
     """
 
     ticket: Ticket
     classification: TicketClassification | None = None
+    retrieval_context: RetrievalContext | None = None
+    draft: DraftResponse | None = None
+    guardrail_results: list[GuardrailResult] | None = None
+    routing_decision: RoutingDecision | None = None
