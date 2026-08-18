@@ -31,6 +31,7 @@ from support_agent.agent.eval_classification import (
 )
 from support_agent.agent.graph import run_agent
 from support_agent.agent.nodes.route import CONFIDENCE_THRESHOLD
+from support_agent.agent.providers.base import ModelTier
 from support_agent.agent.providers.usage import clear_usage_log, get_usage_log
 from support_agent.data.build_gold_set import load_gold_set
 from support_agent.evaluation.llm_judge import judge_response
@@ -40,16 +41,53 @@ from support_agent.schemas import AgentState, Category, GoldSetRow, JudgeScore, 
 
 REPORT_PATH = Path(__file__).parent.parent.parent / "eval" / "results" / "full_report.md"
 
-# Illustrative-only per-1M-token rates — NOT verified against a live
-# pricing source (see gemini_provider.py's docstring on why this project
-# doesn't trust its own training data for provider-specific facts
-# without checking them). Cost below is real token counts
-# (agent/providers/usage.py) x this placeholder rate; treat the dollar
-# figure in the report as order-of-magnitude, not a real budgeting
-# number, until checked against the active provider's current pricing
-# page.
-ILLUSTRATIVE_RATE_PER_MILLION_INPUT_TOKENS = 0.10
-ILLUSTRATIVE_RATE_PER_MILLION_OUTPUT_TOKENS = 0.40
+# Real, verified per-1M-token rates ($ input, $ output), sourced live from
+# the claude-api skill's cached pricing table (confirmed current as of
+# 2026-08-18). FAST = Claude Haiku 4.5; STRONG = Claude Sonnet 5, whose
+# $2/$10 is Anthropic's introductory rate through 2026-08-31 — after that
+# date it reverts to $3/$15 and this table needs updating.
+_ANTHROPIC_PRICE_PER_MILLION_TOKENS = {
+    ModelTier.FAST: (1.00, 5.00),
+    ModelTier.STRONG: (2.00, 10.00),
+}
+
+# Illustrative-only — NOT verified against a live pricing source (see
+# gemini_provider.py's docstring on why this project doesn't trust its
+# own training data for provider-specific facts without checking them).
+# Kept only as a last-resort fallback for a provider this table doesn't
+# otherwise recognize; treat any cost figure computed from this rate as
+# order-of-magnitude, not a real budgeting number.
+_ILLUSTRATIVE_PRICE_PER_MILLION_TOKENS = {
+    ModelTier.FAST: (0.10, 0.40),
+    ModelTier.STRONG: (0.10, 0.40),
+}
+
+_PRICE_PER_MILLION_TOKENS_BY_PROVIDER = {
+    "anthropic": _ANTHROPIC_PRICE_PER_MILLION_TOKENS,
+}
+
+
+def _cost_for_usage_log(usage_log: list) -> tuple[float, bool]:
+    """Returns (total_cost, used_illustrative_rate).
+
+    Prices each recorded call at its own provider+tier rate rather than
+    one blanket rate for the whole run — real for Anthropic, a clearly-
+    labeled placeholder for anything else (e.g. Gemini, whose pricing
+    hasn't been verified live). `used_illustrative_rate` is True if any
+    call in the log fell back to the placeholder, so write_report can
+    caveat the figure honestly instead of always printing the same
+    disclaimer regardless of which provider actually ran.
+    """
+    total_cost = 0.0
+    used_illustrative_rate = False
+    for usage in usage_log:
+        price_table = _PRICE_PER_MILLION_TOKENS_BY_PROVIDER.get(usage.provider)
+        if price_table is None:
+            price_table = _ILLUSTRATIVE_PRICE_PER_MILLION_TOKENS
+            used_illustrative_rate = True
+        in_rate, out_rate = price_table[usage.tier]
+        total_cost += usage.input_tokens / 1_000_000 * in_rate + usage.output_tokens / 1_000_000 * out_rate
+    return total_cost, used_illustrative_rate
 
 
 def _row_to_ticket(row: GoldSetRow) -> Ticket:
@@ -149,10 +187,7 @@ def aggregate_results(
 
     total_input_tokens = sum(u.input_tokens for u in usage_log)
     total_output_tokens = sum(u.output_tokens for u in usage_log)
-    total_cost = (
-        total_input_tokens / 1_000_000 * ILLUSTRATIVE_RATE_PER_MILLION_INPUT_TOKENS
-        + total_output_tokens / 1_000_000 * ILLUSTRATIVE_RATE_PER_MILLION_OUTPUT_TOKENS
-    )
+    total_cost, cost_is_illustrative = _cost_for_usage_log(usage_log)
 
     n_succeeded = len(ticket_results)
     return {
@@ -169,6 +204,7 @@ def aggregate_results(
         "auto_send_rate": auto_send_count / n_succeeded if n_succeeded else 0.0,
         "avg_latency_seconds": sum(latencies) / n_succeeded if n_succeeded else 0.0,
         "est_cost_per_ticket": total_cost / n_succeeded if n_succeeded else 0.0,
+        "cost_is_illustrative": cost_is_illustrative,
         "total_input_tokens": total_input_tokens,
         "total_output_tokens": total_output_tokens,
     }
@@ -199,6 +235,12 @@ def write_report(results: dict, path: Path = REPORT_PATH) -> None:
             entry += f"- {ticket_id}: {error}\n"
         entry += "\n"
 
+    cost_caveat = (
+        "illustrative rate, not verified live pricing — see run_eval.py"
+        if results["cost_is_illustrative"]
+        else "real, verified pricing as of 2026-08-18 — see run_eval.py for the source and expiry "
+        "of any introductory rates"
+    )
     entry += (
         f"### Classification\n"
         f"- Category accuracy: {results['category']['accuracy']:.3f} (n={results['n_succeeded']})\n"
@@ -215,8 +257,7 @@ def write_report(results: dict, path: Path = REPORT_PATH) -> None:
         f"### Operations\n"
         f"- Auto-send rate at threshold={CONFIDENCE_THRESHOLD}: {results['auto_send_rate']:.3f}\n"
         f"- Avg latency per ticket: {results['avg_latency_seconds']:.2f} s\n"
-        f"- Est. cost per ticket: ${results['est_cost_per_ticket']:.5f} "
-        f"(illustrative rate, not verified live pricing — see run_eval.py)\n"
+        f"- Est. cost per ticket: ${results['est_cost_per_ticket']:.5f} ({cost_caveat})\n"
         f"- Total tokens across run: {results['total_input_tokens']} in / {results['total_output_tokens']} out\n"
     )
     entry += "\n"

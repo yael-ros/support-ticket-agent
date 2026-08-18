@@ -10,8 +10,8 @@ from support_agent.agent.eval_classification import GoldSetNotReadyError
 from support_agent.agent.providers.base import ModelTier
 from support_agent.agent.providers.usage import record_usage
 from support_agent.evaluation.run_eval import (
-    ILLUSTRATIVE_RATE_PER_MILLION_INPUT_TOKENS,
-    ILLUSTRATIVE_RATE_PER_MILLION_OUTPUT_TOKENS,
+    _ANTHROPIC_PRICE_PER_MILLION_TOKENS,
+    _ILLUSTRATIVE_PRICE_PER_MILLION_TOKENS,
     run_full_eval,
 )
 from support_agent.schemas import (
@@ -126,7 +126,28 @@ def test_run_full_eval_auto_send_rate_reflects_mixed_routing():
     assert result["auto_send_rate"] == 0.5
 
 
-def test_run_full_eval_computes_cost_from_recorded_usage():
+def test_run_full_eval_computes_real_cost_from_anthropic_usage():
+    rows = [_row("t1")]
+
+    def fake_run_agent(ticket: Ticket) -> AgentState:
+        record_usage(provider="anthropic", tier=ModelTier.FAST, input_tokens=1_000_000, output_tokens=1_000_000)
+        return _fake_state(ticket)
+
+    with (
+        patch("support_agent.evaluation.run_eval.run_agent", side_effect=fake_run_agent),
+        patch("support_agent.evaluation.run_eval.judge_response", return_value=_fake_judge_score()),
+        patch("support_agent.evaluation.run_eval.run_retrieval_eval", return_value=_fake_retrieval_eval()),
+    ):
+        result = run_full_eval(rows)
+
+    in_rate, out_rate = _ANTHROPIC_PRICE_PER_MILLION_TOKENS[ModelTier.FAST]
+    assert result["total_input_tokens"] == 1_000_000
+    assert result["total_output_tokens"] == 1_000_000
+    assert result["est_cost_per_ticket"] == pytest.approx(in_rate + out_rate)
+    assert result["cost_is_illustrative"] is False
+
+
+def test_run_full_eval_falls_back_to_illustrative_rate_for_unrecognized_provider():
     rows = [_row("t1")]
 
     def fake_run_agent(ticket: Ticket) -> AgentState:
@@ -140,9 +161,6 @@ def test_run_full_eval_computes_cost_from_recorded_usage():
     ):
         result = run_full_eval(rows)
 
-    expected_cost = (
-        ILLUSTRATIVE_RATE_PER_MILLION_INPUT_TOKENS + ILLUSTRATIVE_RATE_PER_MILLION_OUTPUT_TOKENS
-    )
-    assert result["total_input_tokens"] == 1_000_000
-    assert result["total_output_tokens"] == 1_000_000
-    assert result["est_cost_per_ticket"] == pytest.approx(expected_cost)
+    in_rate, out_rate = _ILLUSTRATIVE_PRICE_PER_MILLION_TOKENS[ModelTier.FAST]
+    assert result["est_cost_per_ticket"] == pytest.approx(in_rate + out_rate)
+    assert result["cost_is_illustrative"] is True
