@@ -18,14 +18,17 @@ from pydantic import BaseModel
 
 from support_agent.agent.providers.anthropic_provider import AnthropicProvider
 from support_agent.agent.providers.base import LLMCallError, ModelTier
+from support_agent.agent.providers.usage import get_usage_log
 
 
 class _DummySchema(BaseModel):
     value: str
 
 
-def _fake_message(content):
-    return SimpleNamespace(content=content)
+def _fake_message(content, input_tokens: int = 10, output_tokens: int = 5):
+    return SimpleNamespace(
+        content=content, usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens)
+    )
 
 
 def _fake_tool_use_block(input_dict):
@@ -43,7 +46,7 @@ def _make_provider() -> AnthropicProvider:
 
 def test_call_structured_happy_path():
     provider = _make_provider()
-    fake_response = _fake_message([_fake_tool_use_block({"value": "hello"})])
+    fake_response = _fake_message([_fake_tool_use_block({"value": "hello"})], input_tokens=42, output_tokens=7)
     with patch.object(AnthropicProvider, "_call_with_retry", return_value=fake_response):
         result = provider.call_structured(
             prompt="test prompt", response_model=_DummySchema, tier=ModelTier.FAST
@@ -51,6 +54,13 @@ def test_call_structured_happy_path():
 
     assert isinstance(result, _DummySchema)
     assert result.value == "hello"
+
+    usage_log = get_usage_log()
+    assert len(usage_log) == 1
+    assert usage_log[0].provider == "anthropic"
+    assert usage_log[0].tier is ModelTier.FAST
+    assert usage_log[0].input_tokens == 42
+    assert usage_log[0].output_tokens == 7
 
 
 def test_call_structured_no_tool_use_block_raises():

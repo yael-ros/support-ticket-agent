@@ -19,6 +19,7 @@ from support_agent.agent.providers.gemini_provider import (
     GeminiProvider,
     _server_retry_delay_seconds,
 )
+from support_agent.agent.providers.usage import get_usage_log
 
 
 class _DummySchema(BaseModel):
@@ -30,13 +31,18 @@ def _make_provider() -> GeminiProvider:
         return GeminiProvider()
 
 
-def _fake_response(text: str):
-    return SimpleNamespace(text=text)
+def _fake_response(text: str, prompt_tokens: int = 10, candidates_tokens: int = 5, *, no_usage: bool = False):
+    usage = (
+        None
+        if no_usage
+        else SimpleNamespace(prompt_token_count=prompt_tokens, candidates_token_count=candidates_tokens)
+    )
+    return SimpleNamespace(text=text, usage_metadata=usage)
 
 
 def test_call_structured_happy_path():
     provider = _make_provider()
-    fake_response = _fake_response('{"value": "hello"}')
+    fake_response = _fake_response('{"value": "hello"}', prompt_tokens=42, candidates_tokens=7)
     with patch.object(GeminiProvider, "_generate", return_value=fake_response):
         result = provider.call_structured(
             prompt="test prompt", response_model=_DummySchema, tier=ModelTier.FAST
@@ -44,6 +50,22 @@ def test_call_structured_happy_path():
 
     assert isinstance(result, _DummySchema)
     assert result.value == "hello"
+
+    usage_log = get_usage_log()
+    assert len(usage_log) == 1
+    assert usage_log[0].provider == "gemini"
+    assert usage_log[0].tier is ModelTier.FAST
+    assert usage_log[0].input_tokens == 42
+    assert usage_log[0].output_tokens == 7
+
+
+def test_call_structured_skips_usage_log_when_metadata_absent():
+    provider = _make_provider()
+    fake_response = _fake_response('{"value": "hello"}', no_usage=True)
+    with patch.object(GeminiProvider, "_generate", return_value=fake_response):
+        provider.call_structured(prompt="test prompt", response_model=_DummySchema, tier=ModelTier.FAST)
+
+    assert get_usage_log() == []
 
 
 def test_call_structured_empty_text_raises():

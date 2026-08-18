@@ -30,6 +30,15 @@ frequently retries before the quota window has actually rolled over. A
 how long the server wants us to wait — `_wait_seconds` honors that when
 present and only falls back to exponential backoff for errors that don't
 carry one (5xx, or a 429 without RetryInfo).
+
+Thinking disabled (thinking_config.thinking_budget=0) on every call:
+observed live, some models in this family (e.g. gemini-3.5-flash) spend
+hidden reasoning tokens by default even on trivial prompts (319 thinking
+tokens to reply "Hello" to a one-word instruction). None of our
+structured-output use cases (classify/draft/judge) want or need
+chain-of-thought — it only adds cost, latency, and, since thinking
+tokens can eat into max_output_tokens, truncation risk on top of the one
+draft.py already had to fix once (see DRAFT_MAX_TOKENS's docstring).
 """
 
 from __future__ import annotations
@@ -45,6 +54,7 @@ from pydantic import BaseModel, ValidationError
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from support_agent.agent.providers.base import LLMCallError, ModelTier
+from support_agent.agent.providers.usage import record_usage
 
 # Loads a repo-root .env file (gitignored) if present, without overriding
 # any key already set in the real environment. A no-op if no .env file
@@ -54,26 +64,36 @@ load_dotenv()
 MAX_RETRIES = 5
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
-# FAST uses the flash-lite alias rather than a dated flash model:
-# observed live, this key's free tier caps gemini-2.5-flash at a 20
-# requests/DAY quota (not just a per-minute one) — too low to run a
-# 40-row eval in a single sitting — and the dated "gemini-2.5-flash-lite"
-# id 404s for this (new) account ("no longer available to new users").
-# "-latest" aliases (confirmed present via client.models.list() against
-# this key) are Google's own forward-compat pointer to whatever model
-# they currently want new accounts on, and are a separate quota bucket
-# from the dated ids.
+# Both tiers pin a dated, non-preview model id rather than a "-latest"
+# alias. Originally FAST used "gemini-flash-lite-latest" and STRONG used
+# "gemini-flash-latest" — aliases looked like the safer bet (a vendor-
+# maintained forward-compat pointer), but observed live: the FAST alias
+# silently repointed to a different underlying model (gemini-3.7-flash)
+# between one session and the next, and that new model had its own
+# fresh, already-exhausted 20/day free-tier quota, breaking a previously-
+# working call with no code change on our side. A dated id can still get
+# deprecated (see the gemini-2.5-flash-lite 404 below), but at least it
+# fails loudly and predictably instead of silently drifting mid-session.
+# Both ids below were verified live against this key (client.models.list()
+# plus a real generate_content call) on 2026-08-18, not guessed.
 #
-# STRONG was originally set to "gemini-pro-latest" (Phase 3, before any
-# node used it) as a documented placeholder. Once Phase 4's draft.py
-# actually exercised it, that model returned a live 429 with limit: 0 for
-# the free tier ("gemini-3.1-pro" — the Pro family is billed-only on this
-# key, confirmed via the actual error body, not guessed). "gemini-flash-latest"
-# is the next tier up from FAST within the Flash family, which IS free-tier
-# eligible for this key (same family as the confirmed-working FAST model).
+# FAST: gemini-3.1-flash-lite. Cheap/fast tier, no thinking by default
+# (see module docstring on why we disable it anyway).
+#
+# STRONG was originally "gemini-pro-latest" (Phase 3, before any node
+# used it) as a documented placeholder; once Phase 4's draft.py actually
+# exercised it, that resolved to "gemini-3.1-pro" with a live 429 at
+# limit: 0 for the free tier (Pro family is billed-only on this key,
+# confirmed via the error body). gemini-3.5-flash is a step up from FAST
+# within the free-tier-eligible Flash family.
+#
+# NOTE: the dated "gemini-2.5-flash-lite" id 404s for this (new) account
+# ("no longer available to new users") — dated ids from an older
+# generation aren't guaranteed to stay available either. Revisit this
+# pin if either id starts failing.
 MODEL_BY_TIER = {
-    ModelTier.FAST: "gemini-flash-lite-latest",
-    ModelTier.STRONG: "gemini-flash-latest",
+    ModelTier.FAST: "gemini-3.1-flash-lite",
+    ModelTier.STRONG: "gemini-3.5-flash",
 }
 
 T = TypeVar("T", bound=BaseModel)
@@ -141,6 +161,7 @@ class GeminiProvider:
             "response_mime_type": "application/json",
             "response_schema": response_model,
             "max_output_tokens": max_tokens,
+            "thinking_config": {"thinking_budget": 0},
         }
         if system:
             config["system_instruction"] = system
@@ -151,6 +172,15 @@ class GeminiProvider:
             if _is_retryable(exc):
                 raise LLMCallError(f"LLM call failed after {MAX_RETRIES} attempts: {exc}") from exc
             raise LLMCallError(f"LLM call failed: {exc}") from exc
+
+        usage = response.usage_metadata
+        if usage is not None:
+            record_usage(
+                provider="gemini",
+                tier=tier,
+                input_tokens=usage.prompt_token_count or 0,
+                output_tokens=usage.candidates_token_count or 0,
+            )
 
         if not response.text:
             raise LLMCallError(f"Model returned no text content. Response: {response!r}")

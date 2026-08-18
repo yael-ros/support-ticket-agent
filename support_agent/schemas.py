@@ -225,6 +225,23 @@ class RoutingDecision(BaseModel):
     reason: str
 
 
+class JudgeScore(BaseModel):
+    """Structured output of evaluation/llm_judge.py's LLM-as-judge call.
+
+    Scored against evaluation/rubric.md (v1): each dimension is 1-5,
+    defined there. `rationale` is required so a low score is reviewable
+    rather than a bare number — see evaluation/rubric.md's own note.
+    This is an eval-time quality signal only; it never feeds
+    agent/nodes/route.py's auto-send decision (that's guardrails and
+    classification confidence only).
+    """
+
+    helpfulness: int = Field(ge=1, le=5)
+    correctness: int = Field(ge=1, le=5)
+    tone: int = Field(ge=1, le=5)
+    rationale: str
+
+
 class AgentState(BaseModel):
     """Mutable state threaded through the LangGraph agent (agent/graph.py).
 

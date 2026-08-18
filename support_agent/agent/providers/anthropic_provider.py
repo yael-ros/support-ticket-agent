@@ -25,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from support_agent.agent.providers.base import LLMCallError, ModelTier
+from support_agent.agent.providers.usage import record_usage
 
 # Loads a repo-root .env file (gitignored) if present, without overriding
 # any key already set in the real environment. A no-op if no .env file
@@ -101,6 +102,13 @@ class AnthropicProvider:
             raise LLMCallError(f"LLM call failed after {MAX_RETRIES} attempts: {exc}") from exc
         except anthropic.APIError as exc:
             raise LLMCallError(f"LLM call failed: {exc}") from exc
+
+        record_usage(
+            provider="anthropic",
+            tier=tier,
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+        )
 
         tool_use_blocks = [block for block in response.content if block.type == "tool_use"]
         if not tool_use_blocks:

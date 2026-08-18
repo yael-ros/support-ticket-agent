@@ -7,6 +7,8 @@ never as an inline string in a node or route handler.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from support_agent.schemas import RetrievedChunk
 
 CLASSIFY_TICKET_PROMPT = """You are triaging an incoming customer support ticket for a SaaS product. \
@@ -98,4 +100,53 @@ def format_draft_prompt(subject: str, body: str, chunks: list[RetrievedChunk]) -
         chunks_block = "(no relevant excerpts were retrieved for this ticket)"
     return DRAFT_RESPONSE_PROMPT.format(
         subject=subject or "(no subject)", body=body, chunks_block=chunks_block
+    )
+
+
+# Read once at import time so the prompt embeds evaluation/rubric.md's
+# actual text rather than a paraphrase — the documented rubric and what
+# the judge model sees can never drift out of sync this way.
+_RUBRIC_PATH = Path(__file__).parent.parent / "evaluation" / "rubric.md"
+_RUBRIC_TEXT = _RUBRIC_PATH.read_text(encoding="utf-8")
+
+JUDGE_RESPONSE_PROMPT = """You are a support team lead reviewing a drafted reply before it goes to \
+the customer. Score it against the rubric below.
+
+Ticket subject: {subject}
+Ticket body:
+{body}
+
+Knowledge-base excerpts the draft was given:
+{chunks_block}
+
+Drafted reply:
+{draft_text}
+
+Rubric:
+{rubric}
+
+Score the drafted reply on helpfulness, correctness, and tone (1-5 each, per the rubric above), and \
+give a one-sentence rationale for each score.
+
+Respond by calling the emit_result tool with your scores. Do not include any other commentary.
+"""
+
+
+def format_judge_prompt(subject: str, body: str, chunks: list[RetrievedChunk], draft_text: str) -> str:
+    """Fill JUDGE_RESPONSE_PROMPT for a ticket, its retrieved chunks, and a drafted reply.
+
+    Expected output schema: support_agent.schemas.JudgeScore (helpfulness,
+    correctness, tone, rationale), enforced via tool-use in
+    agent/llm_client.py.
+    """
+    if chunks:
+        chunks_block = "\n\n".join(f"[{chunk.chunk_id}] ({chunk.doc_title}): {chunk.text}" for chunk in chunks)
+    else:
+        chunks_block = "(no excerpts were retrieved for this ticket)"
+    return JUDGE_RESPONSE_PROMPT.format(
+        subject=subject or "(no subject)",
+        body=body,
+        chunks_block=chunks_block,
+        draft_text=draft_text,
+        rubric=_RUBRIC_TEXT,
     )

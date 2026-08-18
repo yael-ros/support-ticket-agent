@@ -4,7 +4,6 @@ import pytest
 
 from support_agent.agent.eval_classification import (
     GoldSetNotReadyError,
-    _compute_metrics,
     effective_ground_truth,
     reviewed_rows,
     run_classification_eval,
@@ -63,34 +62,6 @@ def test_effective_ground_truth_raises_for_unreviewed_row():
     row = _row("t1", Category.IT_SUPPORT, Urgency.LOW)
     with pytest.raises(ValueError, match="no human_label"):
         effective_ground_truth(row)
-
-
-def test_compute_metrics_perfect_predictions():
-    y_true = ["a", "b", "a", "b"]
-    y_pred = ["a", "b", "a", "b"]
-    result = _compute_metrics(y_true, y_pred, ["a", "b"])
-    assert result["accuracy"] == 1.0
-    assert result["macro_f1"] == 1.0
-    assert result["per_class"]["a"]["support"] == 2
-
-
-def test_compute_metrics_all_wrong():
-    y_true = ["a", "a"]
-    y_pred = ["b", "b"]
-    result = _compute_metrics(y_true, y_pred, ["a", "b"])
-    assert result["accuracy"] == 0.0
-    assert result["macro_f1"] == 0.0
-
-
-def test_compute_metrics_label_absent_from_sample_does_not_drag_down_macro_f1():
-    # "c" never appears in y_true (support=0), so it's excluded from the
-    # macro-F1 average rather than counting as a 0.0 for a label that
-    # wasn't being tested in this sample.
-    y_true = ["a", "a"]
-    y_pred = ["a", "a"]
-    result = _compute_metrics(y_true, y_pred, ["a", "c"])
-    assert result["macro_f1"] == 1.0
-    assert result["per_class"]["c"]["support"] == 0
 
 
 def test_run_classification_eval_refuses_when_no_rows_labeled():

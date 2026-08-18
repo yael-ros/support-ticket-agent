@@ -26,6 +26,7 @@ from pathlib import Path
 
 from support_agent.agent.nodes.classify import classify_ticket
 from support_agent.data.build_gold_set import GOLD_SET_PATH, load_gold_set
+from support_agent.evaluation.metrics import compute_classification_metrics
 from support_agent.schemas import AgentState, Category, GoldSetRow, Ticket, Urgency
 
 REPORT_PATH = Path(__file__).parent.parent.parent / "eval" / "results" / "classification_report.md"
@@ -62,36 +63,6 @@ def _row_to_ticket(row: GoldSetRow) -> Ticket:
     )
 
 
-def _compute_metrics(y_true: list[str], y_pred: list[str], labels: list[str]) -> dict:
-    """Accuracy plus per-class precision/recall/F1 and macro-F1.
-
-    Macro-F1 averages over labels that actually appear in y_true (support
-    > 0) — labels absent from this eval run don't drag the average down
-    to 0 just for not showing up in a particular sample.
-    """
-    n = len(y_true)
-    accuracy = sum(t == p for t, p in zip(y_true, y_pred, strict=True)) / n if n else 0.0
-
-    per_class = {}
-    f1s = []
-    for label in labels:
-        tp = sum(1 for t, p in zip(y_true, y_pred, strict=True) if t == label and p == label)
-        fp = sum(1 for t, p in zip(y_true, y_pred, strict=True) if t != label and p == label)
-        fn = sum(1 for t, p in zip(y_true, y_pred, strict=True) if t == label and p != label)
-        support = sum(1 for t in y_true if t == label)
-
-        precision = tp / (tp + fp) if (tp + fp) else 0.0
-        recall = tp / (tp + fn) if (tp + fn) else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-
-        per_class[label] = {"precision": precision, "recall": recall, "f1": f1, "support": support}
-        if support > 0:
-            f1s.append(f1)
-
-    macro_f1 = sum(f1s) / len(f1s) if f1s else 0.0
-    return {"accuracy": accuracy, "macro_f1": macro_f1, "per_class": per_class}
-
-
 def run_classification_eval(rows: list[GoldSetRow] | None = None) -> dict:
     rows = rows if rows is not None else load_gold_set()
     labeled = reviewed_rows(rows)
@@ -124,8 +95,8 @@ def run_classification_eval(rows: list[GoldSetRow] | None = None) -> dict:
         "n_total": len(rows),
         "n_labeled": len(labeled),
         "n_skipped_unlabeled": len(rows) - len(labeled),
-        "category": _compute_metrics(category_true, category_pred, [c.value for c in Category]),
-        "urgency": _compute_metrics(urgency_true, urgency_pred, [u.value for u in Urgency]),
+        "category": compute_classification_metrics(category_true, category_pred, [c.value for c in Category]),
+        "urgency": compute_classification_metrics(urgency_true, urgency_pred, [u.value for u in Urgency]),
         "avg_confidence": sum(confidences) / len(confidences) if confidences else 0.0,
     }
 
