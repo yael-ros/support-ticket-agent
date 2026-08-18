@@ -52,6 +52,7 @@ def test_call_structured_happy_path():
 
     _, kwargs = mock_call.call_args
     assert kwargs["output_format"] is _DummySchema
+    assert kwargs["thinking"] == {"type": "disabled"}
 
     usage_log = get_usage_log()
     assert len(usage_log) == 1

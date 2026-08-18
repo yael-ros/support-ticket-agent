@@ -38,6 +38,18 @@ sync with the API's evolving limitations ourselves.
    that failure mode still surfaces as `LLMCallError`, per this
    provider's documented contract, instead of an uncaught pydantic
    exception breaking out of the LLMProvider abstraction.
+4. Claude Sonnet 5 defaults to adaptive thinking ON when `thinking` is
+   omitted (unlike Opus 4.8 and earlier, where omitting it meant no
+   thinking) — confirmed live: a full 40-ticket Phase 5 run had 3/40
+   failures, all draft/judge calls on Sonnet 5 truncating mid-JSON, one
+   with a `ThinkingBlock` visible in the raw response. `max_tokens` caps
+   thinking + response text combined, so hidden reasoning tokens were
+   silently eating the budget meant for the structured JSON output. None
+   of classify/draft/judge need visible chain-of-thought, so
+   `thinking={"type": "disabled"}` is passed on every call (verified live
+   against both Haiku 4.5 and Sonnet 5 that this is accepted, not just
+   assumed) — this also cuts cost and latency, same rationale as
+   gemini_provider.py's `thinking_budget=0`.
 
 SDK version note: `output_format`/`output_config` requires anthropic
 SDK >= ~0.122 (pyproject.toml pins this) — confirmed live that 0.72.1
@@ -123,6 +135,7 @@ class AnthropicProvider:
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
             "output_format": response_model,
+            "thinking": {"type": "disabled"},
         }
         if system:
             kwargs["system"] = system
