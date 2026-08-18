@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from anthropic import APIConnectionError
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from support_agent.agent.providers.anthropic_provider import AnthropicProvider
 from support_agent.agent.providers.base import LLMCallError, ModelTier
@@ -25,18 +25,13 @@ class _DummySchema(BaseModel):
     value: str
 
 
-def _fake_message(content, input_tokens: int = 10, output_tokens: int = 5):
+def _fake_parsed_message(parsed_output, input_tokens: int = 10, output_tokens: int = 5, stop_reason="end_turn"):
     return SimpleNamespace(
-        content=content, usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens)
+        parsed_output=parsed_output,
+        stop_reason=stop_reason,
+        content=[],
+        usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens),
     )
-
-
-def _fake_tool_use_block(input_dict):
-    return SimpleNamespace(type="tool_use", input=input_dict)
-
-
-def _fake_text_block(text):
-    return SimpleNamespace(type="text", text=text)
 
 
 def _make_provider() -> AnthropicProvider:
@@ -46,14 +41,17 @@ def _make_provider() -> AnthropicProvider:
 
 def test_call_structured_happy_path():
     provider = _make_provider()
-    fake_response = _fake_message([_fake_tool_use_block({"value": "hello"})], input_tokens=42, output_tokens=7)
-    with patch.object(AnthropicProvider, "_call_with_retry", return_value=fake_response):
+    fake_response = _fake_parsed_message(_DummySchema(value="hello"), input_tokens=42, output_tokens=7)
+    with patch.object(AnthropicProvider, "_call_with_retry", return_value=fake_response) as mock_call:
         result = provider.call_structured(
             prompt="test prompt", response_model=_DummySchema, tier=ModelTier.FAST
         )
 
     assert isinstance(result, _DummySchema)
     assert result.value == "hello"
+
+    _, kwargs = mock_call.call_args
+    assert kwargs["output_format"] is _DummySchema
 
     usage_log = get_usage_log()
     assert len(usage_log) == 1
@@ -63,22 +61,28 @@ def test_call_structured_happy_path():
     assert usage_log[0].output_tokens == 7
 
 
-def test_call_structured_no_tool_use_block_raises():
+def test_call_structured_unparseable_output_raises():
     provider = _make_provider()
-    fake_response = _fake_message([_fake_text_block("I'd rather just chat")])
+    fake_response = _fake_parsed_message(None, stop_reason="refusal")
     with (
         patch.object(AnthropicProvider, "_call_with_retry", return_value=fake_response),
-        pytest.raises(LLMCallError, match="did not return a tool_use block"),
+        pytest.raises(LLMCallError, match="did not return a parseable"),
     ):
         provider.call_structured(prompt="test prompt", response_model=_DummySchema, tier=ModelTier.FAST)
 
 
-def test_call_structured_schema_validation_failure_raises():
+def test_call_structured_wraps_validation_error_from_unparseable_json():
+    # .parse() raises a bare pydantic.ValidationError (not LLMCallError)
+    # when the response text isn't valid JSON at all — e.g. truncated
+    # mid-string because max_tokens was too small. Reproduced live.
     provider = _make_provider()
-    # Missing the required "value" field.
-    fake_response = _fake_message([_fake_tool_use_block({"wrong_field": 123})])
+    try:
+        _DummySchema.model_validate_json("not valid json")
+    except ValidationError as exc:
+        validation_error = exc
+
     with (
-        patch.object(AnthropicProvider, "_call_with_retry", return_value=fake_response),
+        patch.object(AnthropicProvider, "_call_with_retry", side_effect=validation_error),
         pytest.raises(LLMCallError, match="failed schema validation"),
     ):
         provider.call_structured(prompt="test prompt", response_model=_DummySchema, tier=ModelTier.FAST)
@@ -95,10 +99,10 @@ def test_missing_api_key_raises_on_construction():
 def test_call_with_retry_retries_transient_errors_then_succeeds():
     provider = _make_provider()
     dummy_request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    fake_success = _fake_message([_fake_tool_use_block({"value": "ok"})])
+    fake_success = _fake_parsed_message(_DummySchema(value="ok"))
 
     fake_client = MagicMock()
-    fake_client.messages.create.side_effect = [
+    fake_client.messages.parse.side_effect = [
         APIConnectionError(request=dummy_request),
         APIConnectionError(request=dummy_request),
         fake_success,
@@ -108,4 +112,4 @@ def test_call_with_retry_retries_transient_errors_then_succeeds():
     result = provider._call_with_retry(model="fake-model", max_tokens=10, messages=[])
 
     assert result is fake_success
-    assert fake_client.messages.create.call_count == 3
+    assert fake_client.messages.parse.call_count == 3

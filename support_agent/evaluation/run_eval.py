@@ -92,7 +92,6 @@ def run_full_eval(rows: list[GoldSetRow] | None = None) -> dict:
         )
 
     clear_usage_log()
-    row_by_id = {row.ticket_id: row for row in rows}
     ticket_results: list[TicketRunResult] = []
     failures: list[tuple[str, str]] = []
 
@@ -102,6 +101,28 @@ def run_full_eval(rows: list[GoldSetRow] | None = None) -> dict:
         except Exception as exc:  # noqa: BLE001 - one bad ticket must not abort the batch; see module docstring
             failures.append((row.ticket_id, f"{type(exc).__name__}: {exc}"))
 
+    return aggregate_results(rows, ticket_results, failures)
+
+
+def aggregate_results(
+    rows: list[GoldSetRow],
+    ticket_results: list[TicketRunResult],
+    failures: list[tuple[str, str]],
+    usage_log: list | None = None,
+) -> dict:
+    """Turn a batch of already-completed TicketRunResults into the same dict run_full_eval() returns.
+
+    Split out from run_full_eval() so a batch collected across multiple
+    process runs (e.g. because a single run got interrupted partway
+    through a large gold set — see scratchpad tooling used for that) can
+    still be aggregated and reported the same way, without re-running any
+    LLM calls or duplicating this math. `usage_log` defaults to the
+    current process's live log (agent/providers/usage.py) — pass it
+    explicitly when reconstructing usage recorded in a different process,
+    since a fresh process's live log won't contain it.
+    """
+    usage_log = usage_log if usage_log is not None else get_usage_log()
+    row_by_id = {row.ticket_id: row for row in rows}
     category_true, category_pred = [], []
     urgency_true, urgency_pred = [], []
     helpfulness_scores, correctness_scores, tone_scores = [], [], []
@@ -126,7 +147,6 @@ def run_full_eval(rows: list[GoldSetRow] | None = None) -> dict:
         if result.state.routing_decision.action == "auto_send":
             auto_send_count += 1
 
-    usage_log = get_usage_log()
     total_input_tokens = sum(u.input_tokens for u in usage_log)
     total_output_tokens = sum(u.output_tokens for u in usage_log)
     total_cost = (

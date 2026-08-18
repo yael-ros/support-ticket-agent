@@ -1,10 +1,48 @@
 """Anthropic implementation of the LLMProvider protocol (see providers/base.py).
 
-Structured output is obtained via Claude's tool-use mechanism: the target
-Pydantic model's JSON schema becomes a single forced tool call, so the
-model's reply is JSON matching that schema rather than free-form prose we'd
-have to parse hopefully. This is more reliable than asking the model to
-"please respond in JSON" in the prompt text.
+Structured output goes through `client.messages.parse(output_format=...)`,
+Anthropic's purpose-built structured-output helper — not forced tool-use,
+and not a hand-rolled `output_config.format` call either. Two real bugs
+were found and fixed live getting here, in order:
+
+1. This project originally forced a single tool call instead (the target
+   model's JSON schema as the tool's input_schema), which worked for
+   classify.py's flat TicketClassification schema but broke 100%
+   reproducibly on draft.py's DraftResponse: Claude Sonnet 5 wrapped its
+   output in a bogus extra `{"$PARAMETER_NAME": {...}}` key whenever the
+   tool's input_schema contained a $defs/$ref (DraftResponse nests
+   ClaimGrounding).
+2. Switching to a hand-built `output_config.format` call (passing
+   `response_model.model_json_schema()` directly) fixed that, but then
+   400'd on TicketClassification: `confidence: float = Field(ge=0, le=1)`
+   emits JSON Schema `minimum`/`maximum` keywords, which Anthropic's
+   structured-output schema validator rejects outright — no
+   `additionalProperties` massaging fixes this, it's a genuinely
+   unsupported schema construct server-side.
+
+`client.messages.parse(output_format=response_model)` is the officially
+documented fix for both: it derives the request schema from the Pydantic
+class itself (never sends $ref-adjacent tool-use framing) and strips
+constraints the API doesn't support (minimum/maximum/minLength/etc.)
+before sending, validating them client-side instead — undifferentiated
+schema-translation work we'd otherwise have to reimplement and keep in
+sync with the API's evolving limitations ourselves.
+
+3. `.parse()`'s `response.parsed_output` is `None` when the model
+   returned well-formed JSON that doesn't match the schema, but raises a
+   raw `pydantic.ValidationError` (not caught anywhere by default) when
+   the response text isn't even valid JSON — e.g. truncated mid-string
+   because `max_tokens` was too small for the model's actual output
+   (observed live on evaluation/llm_judge.py's judge call before its own
+   max_tokens was raised). We catch `ValidationError` explicitly below so
+   that failure mode still surfaces as `LLMCallError`, per this
+   provider's documented contract, instead of an uncaught pydantic
+   exception breaking out of the LLMProvider abstraction.
+
+SDK version note: `output_format`/`output_config` requires anthropic
+SDK >= ~0.122 (pyproject.toml pins this) — confirmed live that 0.72.1
+doesn't expose the parameter at all (TypeError at the client, before any
+request is sent).
 
 Retry policy: transient errors (connection issues, timeouts, rate limits,
 5xx server errors) are retried up to MAX_RETRIES times with exponential
@@ -68,8 +106,8 @@ class AnthropicProvider:
         retry=retry_if_exception_type(_RETRYABLE_ERRORS),
         reraise=True,
     )
-    def _call_with_retry(self, **kwargs) -> anthropic.types.Message:
-        return self._client.messages.create(**kwargs)
+    def _call_with_retry(self, **kwargs):
+        return self._client.messages.parse(**kwargs)
 
     def call_structured(
         self,
@@ -80,18 +118,11 @@ class AnthropicProvider:
         max_tokens: int = 1024,
         system: str | None = None,
     ) -> T:
-        tool_schema = {
-            "name": "emit_result",
-            "description": f"Emit the result as {response_model.__name__}.",
-            "input_schema": response_model.model_json_schema(),
-        }
-
         kwargs: dict = {
             "model": MODEL_BY_TIER[tier],
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
-            "tools": [tool_schema],
-            "tool_choice": {"type": "tool", "name": "emit_result"},
+            "output_format": response_model,
         }
         if system:
             kwargs["system"] = system
@@ -102,6 +133,8 @@ class AnthropicProvider:
             raise LLMCallError(f"LLM call failed after {MAX_RETRIES} attempts: {exc}") from exc
         except anthropic.APIError as exc:
             raise LLMCallError(f"LLM call failed: {exc}") from exc
+        except ValidationError as exc:
+            raise LLMCallError(f"Model output failed schema validation: {exc}") from exc
 
         record_usage(
             provider="anthropic",
@@ -110,13 +143,10 @@ class AnthropicProvider:
             output_tokens=response.usage.output_tokens,
         )
 
-        tool_use_blocks = [block for block in response.content if block.type == "tool_use"]
-        if not tool_use_blocks:
+        parsed = response.parsed_output
+        if parsed is None:
             raise LLMCallError(
-                f"Model did not return a tool_use block. Response content: {response.content!r}"
+                f"Model did not return a parseable {response_model.__name__}. "
+                f"stop_reason={response.stop_reason!r}, content={response.content!r}"
             )
-
-        try:
-            return response_model.model_validate(tool_use_blocks[0].input)
-        except ValidationError as exc:
-            raise LLMCallError(f"Model output failed schema validation: {exc}") from exc
+        return parsed

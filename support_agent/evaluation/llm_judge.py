@@ -17,7 +17,11 @@ from support_agent.agent.llm_client import ModelTier, call_structured
 from support_agent.agent.prompts import format_judge_prompt
 from support_agent.schemas import DraftResponse, JudgeScore, RetrievalContext, Ticket
 
-JUDGE_MAX_TOKENS = 512
+# Same failure mode draft.py already hit and fixed: 512 truncated
+# mid-JSON on a live Anthropic call (Claude Sonnet 5's rationale text is
+# more verbose than the small default assumed). Same fix — headroom, not
+# a precisely-derived number.
+JUDGE_MAX_TOKENS = 1024
 
 
 def judge_response(ticket: Ticket, draft: DraftResponse, retrieval_context: RetrievalContext) -> JudgeScore:

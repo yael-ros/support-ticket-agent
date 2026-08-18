@@ -43,7 +43,7 @@ compatibility, security incidents (unauthorized access, data breaches/leaks, sus
 - confidence: your own confidence in this classification, from 0.0 to 1.0. Use a lower value when the \
 ticket is ambiguous or could plausibly belong to more than one category.
 
-Respond by calling the emit_result tool with your classification. Do not include any other commentary.
+Respond with only the structured output in the schema requested. Do not include any other commentary.
 """
 
 
@@ -51,8 +51,9 @@ def format_classify_prompt(subject: str, body: str) -> str:
     """Fill CLASSIFY_TICKET_PROMPT for a specific ticket.
 
     Expected output schema: support_agent.schemas.TicketClassification
-    (category, urgency, confidence), enforced via tool-use in
-    agent/llm_client.py — this function only produces the prompt text.
+    (category, urgency, confidence), enforced by the active provider's
+    structured-output mechanism (agent/llm_client.py, agent/providers/)
+    — this function only produces the prompt text.
     """
     return CLASSIFY_TICKET_PROMPT.format(subject=subject or "(no subject)", body=body)
 
@@ -81,7 +82,7 @@ cover the ticket just to have something to cite.
 Do not promise refunds, discounts, compensation, or any other concession — say a human agent will \
 review requests like that instead.
 
-Respond by calling the emit_result tool with your draft. Do not include any other commentary.
+Respond with only the structured output in the schema requested. Do not include any other commentary.
 """
 
 
@@ -89,8 +90,9 @@ def format_draft_prompt(subject: str, body: str, chunks: list[RetrievedChunk]) -
     """Fill DRAFT_RESPONSE_PROMPT for a specific ticket and its retrieved KB chunks.
 
     Expected output schema: support_agent.schemas.DraftResponse (text,
-    grounding), enforced via tool-use in agent/llm_client.py. Each chunk
-    is labeled with its `chunk_id` in the prompt so the model can cite it
+    grounding), enforced by the active provider's structured-output
+    mechanism (agent/llm_client.py, agent/providers/). Each chunk is
+    labeled with its `chunk_id` in the prompt so the model can cite it
     verbatim in `grounding` — guardrails.grounding_check later checks
     those citations against the same chunk ids.
     """
@@ -128,7 +130,7 @@ Rubric:
 Score the drafted reply on helpfulness, correctness, and tone (1-5 each, per the rubric above), and \
 give a one-sentence rationale for each score.
 
-Respond by calling the emit_result tool with your scores. Do not include any other commentary.
+Respond with only the structured output in the schema requested. Do not include any other commentary.
 """
 
 
@@ -136,8 +138,8 @@ def format_judge_prompt(subject: str, body: str, chunks: list[RetrievedChunk], d
     """Fill JUDGE_RESPONSE_PROMPT for a ticket, its retrieved chunks, and a drafted reply.
 
     Expected output schema: support_agent.schemas.JudgeScore (helpfulness,
-    correctness, tone, rationale), enforced via tool-use in
-    agent/llm_client.py.
+    correctness, tone, rationale), enforced by the active provider's
+    structured-output mechanism (agent/llm_client.py, agent/providers/).
     """
     if chunks:
         chunks_block = "\n\n".join(f"[{chunk.chunk_id}] ({chunk.doc_title}): {chunk.text}" for chunk in chunks)
