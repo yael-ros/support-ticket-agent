@@ -61,18 +61,27 @@ class Ticket(BaseModel):
     None; `answer`, when present, is the dataset's actual historical agent
     reply and is used only as an evaluation reference, never as training
     data to imitate verbatim.
+
+    `category`/`urgency`/`raw_queue`/`raw_priority` are the *known* labels
+    for a ticket sourced from the dataset (weak supervision) or a gold-set
+    row — always populated on those paths. A ticket ingested live via
+    api/main.py's POST /tickets has none of these yet, since determining
+    them is exactly agent/nodes/classify.py's job (written to
+    AgentState.classification, not back onto this object) — so they default
+    to None. No graph node reads these fields off Ticket; only
+    data/build_gold_set.py does, for dataset stratification.
     """
 
     id: str
     subject: str
     body: str
     answer: str | None = None
-    category: Category
-    urgency: Urgency
-    language: str
+    category: Category | None = None
+    urgency: Urgency | None = None
+    language: str = "en"
     ticket_type: str | None = None
-    raw_queue: str
-    raw_priority: str
+    raw_queue: str | None = None
+    raw_priority: str | None = None
 
 
 class HumanLabel(BaseModel):
