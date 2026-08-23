@@ -16,9 +16,10 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.32",
     "slowapi>=0.1.9",
+    "structlog>=24",
 ]
 
-# Phase 1-4 + 6 deps. Later phases add: structlog.
+# Phase 1-4 + 6-7 deps.
 
 [project.optional-dependencies]
 dev = [
