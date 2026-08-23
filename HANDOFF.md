@@ -78,6 +78,43 @@ Phase 6 security hardening pass:
   `google-genai`, `langgraph`, or `pydantic` — the dependencies that
   actually sit in the running API's request path.
 
+### `GET /demo` and `POST /demo/tickets` (portfolio addition, not BUILD_PLAN scope)
+
+`support_agent/api/demo.py` mounts a second, **unauthenticated** surface —
+see `PORTFOLIO_ADDITIONS.md` for why it exists (a portfolio reviewer can't
+be expected to have an API key and a terminal). Because it's public, its
+safety rules are stricter than `/tickets`'s, not looser:
+
+- **Forced free-tier provider.** Every demo request runs under
+  `agent/llm_client.py`'s `force_provider("gemini")`, a `contextvars`-based
+  override — not an env var mutation — so it can't be flipped by, or itself
+  flip, a concurrent authenticated `/tickets` request running on a
+  different provider. This is a hard rule in code, not a config default:
+  the demo endpoint cannot generate real (Anthropic) cost no matter how
+  `LLM_PROVIDER` is set for the rest of the app.
+- **Per-IP rate limit**: 5 requests/minute (`DEMO_PER_IP_RATE_LIMIT`).
+- **Global daily cap**: 50 requests/day, shared across every visitor
+  (`DEMO_DAILY_CAP`), resetting exactly at UTC midnight — the limit is
+  keyed by the current UTC calendar date (`_demo_daily_key`) rather than
+  relying on `slowapi`/`limits`' built-in "day" window, which is actually
+  a rolling 24h-from-first-hit window, not a calendar-day one.
+- **Same length caps as `/tickets`** — reuses the identical
+  `TicketCreateRequest` model (`api/models.py`), so nothing here is looser
+  than the authenticated endpoint.
+- **Never sends email.** The form accepts an optional `customer_email` for
+  parity with `/tickets`, but `create_demo_ticket` never calls
+  `EmailSender.send()`. With `ConsoleEmailSender` this is moot today, but
+  it matters the moment a real provider is wired in per `email_sender.py`'s
+  documented seam — an anonymous, unauthenticated endpoint that emails an
+  arbitrary caller-supplied address on request is an open mail relay
+  waiting to happen.
+- **Bypassing the per-IP limit via IP rotation has no real-cost exposure.**
+  Even a determined visitor rotating IPs to dodge the 5/minute limit is
+  still bounded by the global 50/day cap (which counts every attempt,
+  successful or not, regardless of which IP made it — see `demo.py`'s
+  module docstring) and by the forced free-tier provider. Worst case is
+  exhausting Gemini's own free daily quota early, not an open-ended bill.
+
 Explicitly **out of scope for v1** (this is a single-operator portfolio
 demo, not a production multi-user service):
 

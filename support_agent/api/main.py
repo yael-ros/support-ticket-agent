@@ -19,6 +19,11 @@ auth — see README for what's explicitly out of scope.
 
 Run locally: `SUPPORT_AGENT_API_KEY=<key> uvicorn support_agent.api:app --reload`.
 
+Also mounts api/demo.py's router (`GET /demo`, `POST /demo/tickets`) — an
+unauthenticated, tightly-bounded public demo surface, explicitly out of
+BUILD_PLAN.md's original scope (see PORTFOLIO_ADDITIONS.md). See
+demo.py's own module docstring for its safety rules.
+
 NOTE: deliberately does NOT `from __future__ import annotations` (unlike
 every other module in this project). slowapi's `@limiter.limit` decorator
 wraps this module's route functions in a new function object defined in
@@ -37,41 +42,25 @@ import secrets
 import uuid
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from pydantic import BaseModel, Field
-from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from support_agent.agent.graph import run_agent
 from support_agent.agent.providers.base import LLMCallError
+from support_agent.api import demo
 from support_agent.api.email_sender import ConsoleEmailSender, EmailSender
-from support_agent.schemas import Category, Ticket, Urgency
+from support_agent.api.models import RoutingResponse, TicketCreateRequest, TicketResponse
+from support_agent.api.rate_limit import API_KEY_HEADER, limiter, rate_limit_exceeded_handler
+from support_agent.schemas import Ticket
 
 API_KEY_ENV_VAR = "SUPPORT_AGENT_API_KEY"
-API_KEY_HEADER = "X-API-Key"
 
 # Reasonable default for a portfolio demo, not a tuned production value.
 RATE_LIMIT = "20/minute"
 
-# Ticket bodies feed directly into LLM prompts (classify + draft); bounding
-# their length bounds worst-case cost/latency per request.
-MAX_SUBJECT_LENGTH = 300
-MAX_BODY_LENGTH = 5_000
-
-
-def _rate_limit_key(request: Request) -> str:
-    """Bucket rate limits per caller API key, not per IP.
-
-    Falls back to a shared 'anonymous' bucket for keyless requests — those
-    are rejected by verify_api_key regardless, so the bucket choice only
-    matters for logging/debugging, not for security.
-    """
-    return request.headers.get(API_KEY_HEADER, "anonymous")
-
-
-limiter = Limiter(key_func=_rate_limit_key)
 app = FastAPI(title="Support Ticket Agent")
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+app.include_router(demo.router)
 
 # Dev/demo default. Swap for a real provider per email_sender.py's documented seam.
 _email_sender: EmailSender = ConsoleEmailSender()
@@ -95,36 +84,6 @@ def verify_api_key(x_api_key: str | None = Header(default=None, alias=API_KEY_HE
     expected = os.environ.get(API_KEY_ENV_VAR, "")
     if not expected or not x_api_key or not secrets.compare_digest(x_api_key, expected):
         raise HTTPException(status_code=401, detail="Missing or invalid API key")
-
-
-class TicketCreateRequest(BaseModel):
-    """Raw incoming ticket payload.
-
-    Deliberately has no category/urgency — determining them is
-    agent/nodes/classify.py's job, not the caller's. subject/body are
-    length-capped (see MAX_SUBJECT_LENGTH/MAX_BODY_LENGTH) since both feed
-    directly into LLM prompts downstream.
-    """
-
-    id: str | None = None
-    subject: str = Field(default="", max_length=MAX_SUBJECT_LENGTH)
-    body: str = Field(max_length=MAX_BODY_LENGTH)
-    customer_email: str | None = None
-    language: str = "en"
-
-
-class RoutingResponse(BaseModel):
-    action: str
-    reason: str
-
-
-class TicketResponse(BaseModel):
-    ticket_id: str
-    category: Category
-    urgency: Urgency
-    confidence: float = Field(ge=0.0, le=1.0)
-    routing: RoutingResponse
-    response_text: str | None = None  # populated only when routing.action == "auto_send"
 
 
 @app.post("/tickets", response_model=TicketResponse)

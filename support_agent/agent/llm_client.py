@@ -12,11 +12,25 @@ Provider selection: LLM_PROVIDER=gemini|anthropic, defaulting to "gemini"
 so the eval suite runs against Gemini's free tier out of the box. Anthropic
 remains fully supported — set LLM_PROVIDER=anthropic (and have
 ANTHROPIC_API_KEY set) to switch back with no code change.
+
+force_provider() lets a caller (api/demo.py's unauthenticated demo
+endpoint — see PORTFOLIO_ADDITIONS.md) pin the provider for one call
+tree without touching the LLM_PROVIDER env var, which is process-wide and
+therefore unsafe to mutate per-request under concurrent traffic (one
+demo request flipping it would affect every other in-flight request,
+including authenticated /tickets calls on a different provider). It uses
+a contextvars.ContextVar, which FastAPI/Starlette correctly propagate
+into the thread pool a sync endpoint runs in and correctly isolate
+between concurrent requests (confirmed empirically before relying on
+this — see task history).
 """
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import os
+from collections.abc import Iterator
 from typing import TypeVar
 
 from pydantic import BaseModel
@@ -25,7 +39,7 @@ from support_agent.agent.providers.anthropic_provider import AnthropicProvider
 from support_agent.agent.providers.base import LLMCallError, LLMProvider, ModelTier
 from support_agent.agent.providers.gemini_provider import GeminiProvider
 
-__all__ = ["LLMCallError", "ModelTier", "call_structured"]
+__all__ = ["LLMCallError", "ModelTier", "call_structured", "force_provider"]
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -38,16 +52,31 @@ _PROVIDER_CLASSES: dict[str, type[LLMProvider]] = {
 
 _provider_instances: dict[str, LLMProvider] = {}
 
+_provider_override: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_provider_override", default=None
+)
+
+
+@contextlib.contextmanager
+def force_provider(name: str) -> Iterator[None]:
+    """Force _get_provider() to resolve to `name` for calls made within this context."""
+    token = _provider_override.set(name)
+    try:
+        yield
+    finally:
+        _provider_override.reset(token)
+
 
 def _get_provider() -> LLMProvider:
-    """Resolve LLM_PROVIDER to a (cached, lazily-constructed) provider instance.
+    """Resolve the active provider to a (cached, lazily-constructed) instance.
 
-    Re-reads the env var on every call rather than caching the *name*, so
+    Checks force_provider()'s context override first, then re-reads the
+    LLM_PROVIDER env var on every call rather than caching the *name*, so
     tests (and callers) can switch providers within a process by setting
     the env var — each distinct provider name still only gets constructed
     once (construction is what requires the provider's API key).
     """
-    name = os.environ.get("LLM_PROVIDER", DEFAULT_PROVIDER).lower()
+    name = (_provider_override.get() or os.environ.get("LLM_PROVIDER", DEFAULT_PROVIDER)).lower()
     if name not in _PROVIDER_CLASSES:
         raise LLMCallError(
             f"Unknown LLM_PROVIDER={name!r}; choose one of {sorted(_PROVIDER_CLASSES)}"

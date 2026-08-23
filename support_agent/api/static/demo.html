@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support Ticket Agent — Live Demo</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --border: #e2e5ea;
+    --text: #1a1d23;
+    --muted: #656d78;
+    --accent: #3457d5;
+    --accent-dark: #23408f;
+    --good-bg: #e6f6ea;
+    --good-text: #1e7a34;
+    --warn-bg: #fdf3e2;
+    --warn-text: #8a5a00;
+    --error-bg: #fdecea;
+    --error-text: #a3271e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+  }
+  header h1 {
+    font-size: 1.6rem;
+    margin: 0 0 6px;
+  }
+  header p {
+    color: var(--muted);
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+  }
+  .notice {
+    background: #eef1fb;
+    border: 1px solid #d2d9f5;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    color: #2b3a70;
+    margin: 16px 0 28px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  }
+  .examples {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .examples span {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-right: 4px;
+    align-self: center;
+  }
+  button.example {
+    background: #fff;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  button.example:hover { border-color: var(--accent); color: var(--accent); }
+  label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 16px 0 6px;
+  }
+  label:first-of-type { margin-top: 0; }
+  input[type="text"], input[type="email"], textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    background: #fff;
+    color: var(--text);
+  }
+  textarea { min-height: 110px; resize: vertical; }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+  .actions { margin-top: 22px; display: flex; align-items: center; gap: 12px; }
+  button.submit {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 11px 22px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.submit:hover { background: var(--accent-dark); }
+  button.submit:disabled { background: #a9b2c9; cursor: not-allowed; }
+  .spinner-text { font-size: 0.85rem; color: var(--muted); }
+  #result { margin-top: 28px; }
+  .badge-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: #eef0f4;
+    color: var(--text);
+  }
+  .routing-block {
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    font-size: 0.9rem;
+  }
+  .routing-block.auto_send { background: var(--good-bg); color: var(--good-text); }
+  .routing-block.human_review { background: var(--warn-bg); color: var(--warn-text); }
+  .routing-block .title { font-weight: 700; margin-bottom: 4px; }
+  .response-box {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    white-space: pre-wrap;
+    font-size: 0.9rem;
+    background: #fafbfc;
+  }
+  .error-box {
+    background: var(--error-bg);
+    color: var(--error-text);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: 0.9rem;
+  }
+  footer {
+    margin-top: 40px;
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Support Ticket Agent — Live Demo</h1>
+    <p>Submit a support ticket and watch the real classify → retrieve → draft → guardrail → route pipeline run.</p>
+  </header>
+
+  <div class="notice">
+    This is a portfolio demo instance on free-tier infrastructure — responses can take several
+    seconds, and a shared daily demo limit may occasionally be reached. Nothing you submit here is
+    emailed anywhere; the drafted reply is only ever shown on this page.
+  </div>
+
+  <div class="card">
+    <div class="examples">
+      <span>Try an example:</span>
+      <button type="button" class="example" data-example="sso">SSO login loop</button>
+      <button type="button" class="example" data-example="vague">Vague complaint</button>
+      <button type="button" class="example" data-example="return">Product return</button>
+    </div>
+
+    <form id="ticket-form">
+      <label for="subject">Subject</label>
+      <input type="text" id="subject" maxlength="300" placeholder="Short summary of the issue">
+
+      <label for="body">Message</label>
+      <textarea id="body" maxlength="5000" required placeholder="Describe the issue in as much detail as you'd give a real support team"></textarea>
+
+      <label for="email">Your email (optional)</label>
+      <input type="email" id="email" placeholder="not sent anywhere — display only">
+      <div class="hint">Not used to send anything — this demo never emails a real reply.</div>
+
+      <div class="actions">
+        <button type="submit" class="submit" id="submit-btn">Submit ticket</button>
+        <span class="spinner-text" id="status-text"></span>
+      </div>
+    </form>
+
+    <div id="result"></div>
+  </div>
+
+  <footer>Support Ticket Agent · RAG-powered classify / retrieve / draft / guardrail / route pipeline · portfolio project</footer>
+</div>
+
+<script>
+  const EXAMPLES = {
+    sso: {
+      subject: "Cannot log in via SSO",
+      body: "Every time I try to log in through the company SSO portal, I get redirected back to the login page in an endless loop. I've already cleared my browser cache and cookies and it still happens. This is blocking me from working."
+    },
+    vague: {
+      subject: "",
+      body: "This is unacceptable. I've been a customer for years and keep having problems. Someone needs to sort this out."
+    },
+    return: {
+      subject: "How do I return an item I bought last week?",
+      body: "I ordered a pair of headphones last week and they arrived with a cracked case. I'd like to send them back — can you tell me the return process and how long I have to do it?"
+    }
+  };
+
+  document.querySelectorAll("button.example").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const ex = EXAMPLES[btn.dataset.example];
+      document.getElementById("subject").value = ex.subject;
+      document.getElementById("body").value = ex.body;
+    });
+  });
+
+  const form = document.getElementById("ticket-form");
+  const submitBtn = document.getElementById("submit-btn");
+  const statusText = document.getElementById("status-text");
+  const resultEl = document.getElementById("result");
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function renderResult(data) {
+    const action = data.routing.action;
+    const actionLabel = action === "auto_send" ? "Auto-sent" : "Routed to human review";
+    let html = "";
+    html += '<div class="badge-row">';
+    html += '<span class="badge">Category: ' + escapeHtml(data.category) + '</span>';
+    html += '<span class="badge">Urgency: ' + escapeHtml(data.urgency) + '</span>';
+    html += '<span class="badge">Confidence: ' + (data.confidence * 100).toFixed(0) + '%</span>';
+    html += '</div>';
+    html += '<div class="routing-block ' + action + '">';
+    html += '<div class="title">' + actionLabel + '</div>';
+    html += '<div>' + escapeHtml(data.routing.reason) + '</div>';
+    html += '</div>';
+    if (data.response_text) {
+      html += '<div class="response-box">' + escapeHtml(data.response_text) + '</div>';
+    }
+    resultEl.innerHTML = html;
+  }
+
+  function renderError(message) {
+    resultEl.innerHTML = '<div class="error-box">' + escapeHtml(message) + '</div>';
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submitBtn.disabled = true;
+    statusText.textContent = "Running the pipeline — this can take several seconds…";
+    resultEl.innerHTML = "";
+
+    const body = {
+      subject: document.getElementById("subject").value,
+      body: document.getElementById("body").value,
+      customer_email: document.getElementById("email").value || null
+    };
+
+    try {
+      const resp = await fetch("/demo/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json();
+
+      if (resp.ok) {
+        renderResult(data);
+      } else if (resp.status === 429) {
+        renderError(data.error || "Rate limit exceeded. Please try again shortly.");
+      } else if (resp.status === 422) {
+        renderError("Please check your input: " + JSON.stringify(data.detail));
+      } else {
+        renderError(data.detail || data.error || "Something went wrong processing this ticket.");
+      }
+    } catch (err) {
+      renderError("Could not reach the server: " + err.message);
+    } finally {
+      submitBtn.disabled = false;
+      statusText.textContent = "";
+    }
+  });
+</script>
+</body>
+</html>
