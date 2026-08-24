@@ -6,7 +6,6 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2",
     "datasets>=2",
-    "sentence-transformers>=5",
     "chromadb>=1",
     "anthropic>=0.122",  # <0.122 lacks output_config (structured outputs) as a typed param — confirmed 0.72.1 doesn't have it, 0.122.0 does
     "google-genai>=1",
@@ -20,6 +19,36 @@ dependencies = [
 ]
 
 # Phase 1-4 + 6-7 deps.
+#
+# NOTE: no local ML/embedding library (sentence-transformers, torch, etc.)
+# is a dependency here on purpose — see knowledge_base/embeddings.py's
+# module docstring. sentence-transformers (and the torch it pulls in) used
+# to be a dependency and was removed specifically because it crashed the
+# Render free-tier deployment's 512Mi memory limit: torch alone measured
+# at ~261MB of process RSS just to import, and on Render specifically it
+# resolved to the full CUDA-enabled wheel (nvidia-cudnn/cufft/cusolver/
+# nccl etc. all pulled in as dependencies) rather than a CPU-only build,
+# since nothing in this file told pip/uv to prefer the CPU wheel index —
+# confirmed from Render's build log, not assumed.
+#
+# If any future dependency ever pulls torch back in, DO NOT let it
+# silently resolve to the CUDA wheel again: pin it to PyTorch's CPU-only
+# index. With uv (this project's primary installer — see CLAUDE.md):
+#
+#   [tool.uv.sources]
+#   torch = [{ index = "pytorch-cpu" }]
+#
+#   [[tool.uv.index]]
+#   name = "pytorch-cpu"
+#   url = "https://download.pytorch.org/whl/cpu"
+#   explicit = true
+#
+# With plain pip, there's no equivalent per-package index override in
+# pyproject.toml itself — you'd need PIP_INDEX_URL/PIP_EXTRA_INDEX_URL set
+# in the deploy environment, or (more reliably) switch the Render build
+# command to `uv sync`. Better still: avoid the problem entirely, the way
+# this project now does — prefer a hosted embedding API over a local
+# torch-backed model unless there's a specific reason not to.
 
 [project.optional-dependencies]
 dev = [

@@ -23,6 +23,15 @@ a contextvars.ContextVar, which FastAPI/Starlette correctly propagate
 into the thread pool a sync endpoint runs in and correctly isolate
 between concurrent requests (confirmed empirically before relying on
 this — see task history).
+
+Provider SDKs are imported lazily, inside _load_anthropic_provider() /
+_load_gemini_provider(), not at module top level. Measured directly
+(see HANDOFF.md's Ops section): the anthropic SDK costs ~15MB of process
+RSS to import, google-genai ~76MB — importing both unconditionally at
+process startup, when a given deployment only ever uses one, was pure
+waste on a memory-constrained free-tier host. Whichever provider
+LLM_PROVIDER actually resolves to now only pays that cost on its first
+real call, and the other provider's SDK is never imported at all.
 """
 
 from __future__ import annotations
@@ -30,14 +39,12 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import TypeVar
 
 from pydantic import BaseModel
 
-from support_agent.agent.providers.anthropic_provider import AnthropicProvider
 from support_agent.agent.providers.base import LLMCallError, LLMProvider, ModelTier
-from support_agent.agent.providers.gemini_provider import GeminiProvider
 
 __all__ = ["LLMCallError", "ModelTier", "call_structured", "force_provider"]
 
@@ -45,9 +52,22 @@ T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_PROVIDER = "gemini"
 
-_PROVIDER_CLASSES: dict[str, type[LLMProvider]] = {
-    "anthropic": AnthropicProvider,
-    "gemini": GeminiProvider,
+
+def _load_anthropic_provider() -> LLMProvider:
+    from support_agent.agent.providers.anthropic_provider import AnthropicProvider
+
+    return AnthropicProvider()
+
+
+def _load_gemini_provider() -> LLMProvider:
+    from support_agent.agent.providers.gemini_provider import GeminiProvider
+
+    return GeminiProvider()
+
+
+_PROVIDER_FACTORIES: dict[str, Callable[[], LLMProvider]] = {
+    "anthropic": _load_anthropic_provider,
+    "gemini": _load_gemini_provider,
 }
 
 _provider_instances: dict[str, LLMProvider] = {}
@@ -77,12 +97,12 @@ def _get_provider() -> LLMProvider:
     once (construction is what requires the provider's API key).
     """
     name = (_provider_override.get() or os.environ.get("LLM_PROVIDER", DEFAULT_PROVIDER)).lower()
-    if name not in _PROVIDER_CLASSES:
+    if name not in _PROVIDER_FACTORIES:
         raise LLMCallError(
-            f"Unknown LLM_PROVIDER={name!r}; choose one of {sorted(_PROVIDER_CLASSES)}"
+            f"Unknown LLM_PROVIDER={name!r}; choose one of {sorted(_PROVIDER_FACTORIES)}"
         )
     if name not in _provider_instances:
-        _provider_instances[name] = _PROVIDER_CLASSES[name]()
+        _provider_instances[name] = _PROVIDER_FACTORIES[name]()
     return _provider_instances[name]
 
 

@@ -32,6 +32,50 @@ Not required to build this. If you want it:
   connector only if you want to manually test what a sent message looks
   like during development.
 
+## Ops: the Render free-tier memory crash (2026-08-24)
+
+The Render deployment crashed with "Out of memory (used over 512Mi)".
+Investigated with a real RSS-measurement script (not assumed) walking the
+app's actual import chain step by step:
+
+- **`sentence-transformers` (→ `torch`) was the dominant cost**: ~261MB of
+  process RSS just to import, plus another ~40MB the moment the local
+  embedding model's weights actually loaded on first `retrieve()` call.
+  Confirmed from Render's own build log that `torch` had resolved to the
+  **full CUDA-enabled wheel** on Render's Linux container (nvidia-cudnn,
+  nvidia-cufft, nvidia-cusolver, nvidia-nccl, etc. all pulled in as
+  dependencies) rather than a CPU-only build — nothing in `pyproject.toml`
+  told pip/uv to prefer the CPU wheel index, so it silently took the
+  larger default. Startup alone (before any request) measured at 456MB —
+  89% of the 512Mi ceiling with zero traffic.
+- A secondary, smaller finding: `agent/llm_client.py` imported **both**
+  the `anthropic` and `google-genai` SDKs unconditionally at module load
+  (~15.5MB and ~76.4MB respectively), regardless of which one
+  `LLM_PROVIDER` actually selected.
+
+**Fix**: replaced the local `sentence-transformers` model with Gemini's
+hosted embedding API (`knowledge_base/embeddings.py` — see its module
+docstring for the model choice and the new `GEMINI_API_KEY` coupling this
+introduces), and made `llm_client.py`'s provider SDK imports lazy (only
+the configured provider's SDK is ever imported, not both). See
+`pyproject.toml`'s dependencies-block comment for the CPU-only-torch
+pinning mechanism to use if a torch-backed dependency is ever
+reintroduced — not applied as live config right now since torch isn't a
+dependency at all anymore, which is strictly better than pinning it.
+
+**Result** (measured the same way, real script, real end-to-end
+`run_agent()` call — classify + retrieve + draft + guardrail + route, not
+just import): **236MB**, down from 496MB for *less* work (the old
+measurement stopped at `retrieve()`, before a real classify/draft cycle).
+`anthropic` is no longer imported at all when `LLM_PROVIDER=gemini`
+(confirmed via `sys.modules`); `google-genai` is still always imported
+regardless of `LLM_PROVIDER`, since embeddings now unconditionally depend
+on it — worth knowing if you ever look at `sys.modules` and expect it
+absent under `LLM_PROVIDER=anthropic`. Retrieval quality is unchanged
+post-swap: precision@3=0.333, recall@5=1.000 (n=40), identical to the
+pre-swap baseline — see `eval/results/retrieval_report.md`'s
+2026-08-24 entry.
+
 ## Security
 
 What's in place on `POST /tickets` (`support_agent/api/main.py`) as of the

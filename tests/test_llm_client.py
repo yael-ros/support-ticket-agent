@@ -34,7 +34,7 @@ def test_call_structured_delegates_to_configured_provider():
 
     with (
         patch.dict("os.environ", {"LLM_PROVIDER": "gemini"}),
-        patch.object(llm_client, "_PROVIDER_CLASSES", {"gemini": fake_provider_cls}),
+        patch.object(llm_client, "_PROVIDER_FACTORIES", {"gemini": fake_provider_cls}),
     ):
         result = call_structured(prompt="p", response_model=_DummySchema, tier=ModelTier.FAST)
 
@@ -48,7 +48,7 @@ def test_defaults_to_gemini_when_env_var_unset():
     fake_provider_cls = MagicMock()
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch.object(llm_client, "_PROVIDER_CLASSES", {"gemini": fake_provider_cls}),
+        patch.object(llm_client, "_PROVIDER_FACTORIES", {"gemini": fake_provider_cls}),
     ):
         llm_client._get_provider()
 
@@ -67,7 +67,7 @@ def test_provider_instance_is_cached_across_calls():
     fake_provider_cls = MagicMock()
     with (
         patch.dict("os.environ", {"LLM_PROVIDER": "gemini"}),
-        patch.object(llm_client, "_PROVIDER_CLASSES", {"gemini": fake_provider_cls}),
+        patch.object(llm_client, "_PROVIDER_FACTORIES", {"gemini": fake_provider_cls}),
     ):
         first = llm_client._get_provider()
         second = llm_client._get_provider()
@@ -83,7 +83,7 @@ def test_force_provider_overrides_the_env_var_within_its_context():
         patch.dict("os.environ", {"LLM_PROVIDER": "anthropic"}),
         patch.object(
             llm_client,
-            "_PROVIDER_CLASSES",
+            "_PROVIDER_FACTORIES",
             {"gemini": fake_gemini_cls, "anthropic": fake_anthropic_cls},
         ),
     ):
@@ -104,7 +104,7 @@ def test_force_provider_resets_after_the_context_exits():
         patch.dict("os.environ", {"LLM_PROVIDER": "anthropic"}),
         patch.object(
             llm_client,
-            "_PROVIDER_CLASSES",
+            "_PROVIDER_FACTORIES",
             {"gemini": fake_gemini_cls, "anthropic": fake_anthropic_cls},
         ),
     ):

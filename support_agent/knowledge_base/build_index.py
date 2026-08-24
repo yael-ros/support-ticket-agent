@@ -106,8 +106,8 @@ def build_index(documents: list[KBDocument] = DOCUMENTS, persist_dir: Path = CHR
     if COLLECTION_NAME in existing:
         client.delete_collection(COLLECTION_NAME)
     # Explicit cosine space so retriever.py's similarity score is exactly
-    # `1 - distance`, independent of whether embeddings happen to be
-    # unit-normalized (they aren't, by default, from SentenceTransformer.encode).
+    # `1 - distance`, independent of whether embeddings.py's embedding
+    # source happens to return unit-normalized vectors or not.
     collection = client.create_collection(COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
 
     collection.add(

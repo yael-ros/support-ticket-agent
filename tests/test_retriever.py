@@ -3,17 +3,37 @@
 Builds a real (tiny) Chroma collection under a pytest tmp_path using the
 real embedding model — this is deliberately not mocked, since the thing
 being tested is actual semantic similarity ranking, which a mock would
-trivially fake. Runs the local CPU model, so it's slower than a pure unit
-test but still fast enough (a handful of short documents).
+trivially fake.
+
+The ranking tests below are opt-in, gated behind RUN_LIVE_EMBEDDING_TESTS,
+mirroring test_anthropic_provider_live.py's pattern: embeddings.py now
+calls Gemini's hosted embedding API (see its module docstring) rather
+than running a free local model, so exercising real ranking behavior
+means a real, quota-consuming network call on every test run unless
+opted in — every other test in this project mocks the API for exactly
+this reason. test_retrieve_missing_index_raises stays unconditional: it
+fails inside _get_collection() before retrieve() ever calls embed_texts(),
+so it has no live dependency to gate.
+
+    RUN_LIVE_EMBEDDING_TESTS=1 pytest tests/test_retriever.py
+
+Requires a real GEMINI_API_KEY (via env var or a gitignored .env).
 """
 
 from __future__ import annotations
+
+import os
 
 import pytest
 
 from support_agent.knowledge_base.build_index import build_index
 from support_agent.knowledge_base.retriever import retrieve
 from support_agent.schemas import Category, KBDocument
+
+_live_embeddings = pytest.mark.skipif(
+    os.environ.get("RUN_LIVE_EMBEDDING_TESTS") != "1",
+    reason="opt-in live test — set RUN_LIVE_EMBEDDING_TESTS=1 (and a real GEMINI_API_KEY) to run it",
+)
 
 FIXTURE_DOCS = [
     KBDocument(
@@ -47,6 +67,7 @@ def fixture_index(tmp_path_factory):
     return persist_dir
 
 
+@_live_embeddings
 def test_retrieve_returns_ranked_chunks_with_expected_fields(fixture_index):
     results = retrieve("I forgot my password and can't log in", k=3, persist_dir=fixture_index)
 
@@ -59,6 +80,7 @@ def test_retrieve_returns_ranked_chunks_with_expected_fields(fixture_index):
     assert scores == sorted(scores, reverse=True)
 
 
+@_live_embeddings
 def test_retrieve_respects_category_filter(fixture_index):
     results = retrieve(
         "forgot password", k=3, category=Category.RETURNS_AND_EXCHANGES, persist_dir=fixture_index
