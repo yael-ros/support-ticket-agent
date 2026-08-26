@@ -35,6 +35,8 @@ depends on knowledge_base via agent/nodes/retrieve.py).
 
 from __future__ import annotations
 
+import os
+
 from dotenv import load_dotenv
 from google import genai
 from google.genai import errors as genai_errors
@@ -56,7 +58,21 @@ _client: genai.Client | None = None
 def _get_client() -> genai.Client:
     global _client
     if _client is None:
-        _client = genai.Client()
+        # Explicit check rather than letting genai.Client() hit its own
+        # generic "Missing key inputs argument!" ValueError — this needs
+        # to fail loudly and specifically here, since build_index.py now
+        # calls embed_texts() at deploy *build* time (see its module
+        # docstring): a vague SDK error at that point is much harder to
+        # diagnose than "GEMINI_API_KEY is not set" pointing straight at
+        # a missing Render build-time env var.
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not set. Set it as an environment variable "
+                "(or in a gitignored .env file) before building the KB index "
+                "or making retrieval calls."
+            )
+        _client = genai.Client(api_key=api_key)
     return _client
 
 
@@ -81,7 +97,11 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     try:
         response = _embed(texts)
     except genai_errors.APIError as exc:
-        raise RuntimeError(f"Embedding call failed after retries: {exc}") from exc
+        if _is_retryable(exc):
+            raise RuntimeError(
+                f"Embedding call failed after {MAX_RETRIES} attempts: {exc}"
+            ) from exc
+        raise RuntimeError(f"Embedding call failed: {exc}") from exc
 
     if response.embeddings is None:
         raise RuntimeError(f"Embedding call returned no embeddings. Response: {response!r}")

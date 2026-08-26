@@ -32,6 +32,58 @@ Not required to build this. If you want it:
   connector only if you want to manually test what a sent message looks
   like during development.
 
+## Deploy (Render)
+
+The deployed app needs the KB vector index (`support_agent/knowledge_base
+/chroma/`) to exist, but that directory is **gitignored** — it's a
+generated artifact, not source (see `build_index.py`'s docstring: it
+deletes and recreates the Chroma collection from scratch on every run,
+specifically so stale chunks never linger). The actual source of truth,
+`support_agent/knowledge_base/documents.py` (the 40 hand-authored KB
+articles), *is* committed — confirmed via `git ls-files` /
+`git check-ignore`, not assumed. This means the index must be built fresh
+as part of every deploy, not shipped as a committed file.
+
+**Build Command** (set this in Render's dashboard under the service's
+Settings → Build & Deploy, or see `render.yaml` below):
+
+```
+pip install -e . && python -m support_agent.knowledge_base.build_index
+```
+
+**Start Command** (unchanged):
+
+```
+uvicorn support_agent.api:app --host 0.0.0.0 --port $PORT
+```
+
+**`GEMINI_API_KEY` is now required at *build* time, not just runtime.**
+`build_index.py` calls `embed_texts()` to embed all 42 KB chunks, which
+now calls Gemini's hosted embedding API (see `knowledge_base/embeddings.py`
+— this is the same change that fixed the free-tier memory crash below).
+If the key isn't available during the build step, the build fails
+immediately with a clear `GEMINI_API_KEY is not set` error (see
+`embeddings.py`'s `_get_client()`) rather than a vague SDK error or a
+silently-empty index. Render's standard behavior for a native (non-Docker)
+Python web service is to run the build step in the same environment as
+runtime, so dashboard-configured environment variables should already be
+available at build time — **this is Render's documented standard
+behavior, not something verified against this specific account's service
+configuration**, since there's no Render CLI/API access available to
+check it directly. If the build fails on a missing key, that's the first
+thing to check in the service's Environment settings.
+
+`render.yaml` in the repo root declares this Blueprint-style, with
+`GEMINI_API_KEY`/`ANTHROPIC_API_KEY`/`SUPPORT_AGENT_API_KEY` marked
+`sync: false` (Render prompts for the value in its dashboard rather than
+reading it from the committed file). **This file only takes effect if the
+Render service is actually deployed/synced from it** — either by creating
+a new service via "New Blueprint," or by enabling Blueprint sync on an
+existing one. A service originally created by hand through the dashboard
+keeps using whatever's typed into its own Build/Start Command fields
+regardless of what's in this file; update those fields directly with the
+commands above in that case.
+
 ## Ops: the Render free-tier memory crash (2026-08-24)
 
 The Render deployment crashed with "Out of memory (used over 512Mi)".

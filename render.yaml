@@ -1,0 +1,38 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec). Only takes
+# effect if this service is deployed/synced from this file — a service
+# created by hand through Render's dashboard keeps using whatever's typed
+# into its own Build/Start Command fields there instead. See HANDOFF.md's
+# Deploy section for the exact manual dashboard values if you're not using
+# Blueprint sync.
+#
+# buildCommand rebuilds the KB vector index from support_agent/knowledge_base
+# /documents.py on every deploy — support_agent/knowledge_base/chroma/ is
+# gitignored (a generated artifact, not source), so without this step the
+# deployed app has no index to retrieve against at all. build_index.py
+# recreates the Chroma collection from scratch each run (see its own
+# docstring), so this is safe to run unconditionally on every build.
+services:
+  - type: web
+    name: support-ticket-agent
+    env: python
+    plan: free
+    buildCommand: "pip install -e . && python -m support_agent.knowledge_base.build_index"
+    startCommand: "uvicorn support_agent.api:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      # Required at BUILD time too, not just runtime: build_index.py calls
+      # embed_texts() (knowledge_base/embeddings.py), which now calls
+      # Gemini's hosted embedding API rather than running a local model —
+      # see embeddings.py's module docstring for why. sync: false means
+      # Render prompts for the value in its dashboard rather than reading
+      # it from this committed file — never commit the actual key.
+      - key: GEMINI_API_KEY
+        sync: false
+      # Only required at runtime (classify/draft), not at build time,
+      # unless LLM_PROVIDER=anthropic is also used for the KB build itself
+      # (it isn't — embeddings always use Gemini regardless of this var).
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SUPPORT_AGENT_API_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: gemini
