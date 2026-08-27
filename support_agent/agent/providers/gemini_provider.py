@@ -100,7 +100,10 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def _is_retryable(exc: BaseException) -> bool:
-    return isinstance(exc, genai_errors.APIError) and getattr(exc, "code", None) in _RETRYABLE_STATUS_CODES
+    return (
+        isinstance(exc, genai_errors.APIError)
+        and getattr(exc, "code", None) in _RETRYABLE_STATUS_CODES
+    )
 
 
 _RETRY_DELAY_PATTERN = re.compile(r"^([\d.]+)s$")
@@ -162,6 +165,23 @@ class GeminiProvider:
             "response_schema": response_model,
             "max_output_tokens": max_tokens,
             "thinking_config": {"thinking_budget": 0},
+            # We never pass `tools`, so Automatic Function Calling — the
+            # SDK's optional feature for auto-executing Python callables the
+            # model requests mid-response — is irrelevant to every call this
+            # method makes; only response_schema constrains the output
+            # shape. Disabled explicitly (rather than relying on it being a
+            # no-op without tools) because some google-genai SDK versions
+            # emit an "AFC in Models.generate_content is not recommended"
+            # warning on plain generate_content calls regardless of whether
+            # tools are present — confirmed absent in the SDK version
+            # installed at the time of this change, so this is defensive
+            # against whichever version actually ends up installed on a
+            # given deploy (pyproject.toml only pins a floating >=1 lower
+            # bound). Chat.send_message (the SDK's other suggested
+            # alternative) isn't a fit either way: it's for multi-turn
+            # conversational state, and every call here is a stateless,
+            # independent structured-output request.
+            "automatic_function_calling": {"disable": True},
         }
         if system:
             config["system_instruction"] = system
