@@ -6,6 +6,9 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# Windows folder-view metadata
+desktop.ini
+
 # secrets
 .env
 
