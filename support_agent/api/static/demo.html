@@ -134,6 +134,16 @@
   .routing-block.auto_send { background: var(--good-bg); color: var(--good-text); }
   .routing-block.human_review { background: var(--warn-bg); color: var(--warn-text); }
   .routing-block .title { font-weight: 700; margin-bottom: 4px; }
+  .routing-block details { margin-top: 10px; font-size: 0.82rem; }
+  .routing-block summary { cursor: pointer; font-weight: 600; }
+  .routing-block summary:hover { text-decoration: underline; }
+  .routing-block .reason-detail-text {
+    margin-top: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    opacity: 0.85;
+    word-break: break-word;
+  }
   .response-box {
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -236,6 +246,8 @@
     return div.innerHTML;
   }
 
+  const HUMAN_REVIEW_FRIENDLY_MESSAGE = "This ticket has been flagged for a team member to review before a response is sent, rather than being sent automatically.";
+
   function renderResult(data) {
     const action = data.routing.action;
     const actionLabel = action === "auto_send" ? "Auto-sent" : "Routed to human review";
@@ -247,7 +259,15 @@
     html += '</div>';
     html += '<div class="routing-block ' + action + '">';
     html += '<div class="title">' + actionLabel + '</div>';
-    html += '<div>' + escapeHtml(data.routing.reason) + '</div>';
+    if (action === "auto_send") {
+      html += '<div>' + escapeHtml(data.routing.reason) + '</div>';
+    } else {
+      html += '<div>' + escapeHtml(HUMAN_REVIEW_FRIENDLY_MESSAGE) + '</div>';
+      html += '<details>';
+      html += '<summary>Why was this flagged?</summary>';
+      html += '<div class="reason-detail-text">' + escapeHtml(data.routing.reason) + '</div>';
+      html += '</details>';
+    }
     html += '</div>';
     if (data.response_text) {
       html += '<div class="response-box">' + escapeHtml(data.response_text) + '</div>';
