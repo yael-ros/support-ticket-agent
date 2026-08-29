@@ -4,7 +4,7 @@ A RAG-powered customer support agent that classifies incoming tickets,
 retrieves relevant knowledge-base articles, drafts a grounded reply,
 checks that reply against a set of guardrails, and routes it to either
 auto-send or a human review queue. Built as a portfolio project to
-demonstrate end-to-end LLM application engineering — not just an API
+demonstrate end-to-end LLM application engineering - not just an API
 wrapper around a chat completion: a typed multi-node agent graph
 (LangGraph), a real retrieval pipeline with its own precision/recall
 numbers, deterministic post-hoc guardrails instead of prompt-only safety,
@@ -15,11 +15,11 @@ real, reproducible numbers rather than hand-waved claims.
 
 **[support-ticket-agent-9ptn.onrender.com/demo](https://support-ticket-agent-9ptn.onrender.com/demo)**
 
-Runs on Render's free tier — the instance spins down when idle, so the
+Runs on Render's free tier - the instance spins down when idle, so the
 first request after a while can take 30-60 seconds to cold-start. Submit
 a ticket and it runs through the real pipeline (classify → retrieve →
 draft → guardrail → route) live; nothing is canned. Nothing you submit is
-emailed anywhere — the drafted reply is only ever shown on the page. See
+emailed anywhere - the drafted reply is only ever shown on the page. See
 [`PORTFOLIO_ADDITIONS.md`](PORTFOLIO_ADDITIONS.md) for why this
 unauthenticated demo surface exists alongside the authenticated API, and
 its Security section (linked below) for the safeguards on it.
@@ -27,16 +27,16 @@ its Security section (linked below) for the safeguards on it.
 ## Screenshots
 
 <!--
-  TODO (screenshots not yet added — no browser/screenshot tooling was
+  TODO (screenshots not yet added - no browser/screenshot tooling was
   available to generate these automatically):
   1. Open the live demo link above.
   2. Click "SSO login loop", submit, screenshot the result panel, save as
-     docs/screenshot-auto-send.png — it reliably classifies as
+     docs/screenshot-auto-send.png - it reliably classifies as
      it_support/high confidence and auto-sends with a grounded reply.
   3. Click "Vague complaint", submit, screenshot the result panel, save as
-     docs/screenshot-human-review.png — low-detail tickets typically fall
+     docs/screenshot-human-review.png - low-detail tickets typically fall
      below the confidence threshold and route to human review.
-  Once both files exist at those paths, the images below render as-is —
+  Once both files exist at those paths, the images below render as-is -
   no further edits needed.
 -->
 
@@ -50,12 +50,12 @@ Ticket → classify → retrieve → draft → guardrail_check → route → aut
 ```
 
 An explicit [LangGraph](https://github.com/langchain-ai/langgraph) state
-machine (`agent/graph.py`), not a single mega-prompt — every node reads
+machine (`agent/graph.py`), not a single mega-prompt - every node reads
 and writes specific typed fields on a shared `AgentState` and is
 independently unit-tested. Retrieval runs against a local Chroma vector
 store built from 40 hand-authored knowledge-base articles. Guardrails
-(`agent/guardrails.py`) are plain testable functions — unauthorized
-promises, PII, tone, and citation grounding — not "please don't do X" in
+(`agent/guardrails.py`) are plain testable functions - unauthorized
+promises, PII, tone, and citation grounding - not "please don't do X" in
 a prompt. Structured JSON logging (`observability/`) traces every node's
 input/output summary, latency, and the final routing decision per ticket.
 
